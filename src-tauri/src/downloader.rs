@@ -190,8 +190,8 @@ fn spawn_stats_monitor(stats: Arc<ThreadStats>, file_label: String) -> tokio::sy
                         "[Downloader] {}  总分片={}  请求中={}  接收中={}  失败={}  速度={}",
                         file_label, total, req, rec, fail, speed_str
                     );
-                    // 三重保险：log (Tauri 日志插件) + stderr + stdout
-                    println!("{}", line);
+                    //下载日志
+                    //println!("{}", line);
                 }
                 _ = &mut stop_rx => {
                     break;
@@ -413,6 +413,7 @@ async fn start_download_internal(app: &AppHandle) -> Result<DownloadDonePayload,
             stage_percent: stage_pct, overall_percent: overall,
             attempt: 1, url: None,
             total_downloaded: already_done_bytes, total_bytes: total_pack_bytes,
+            speed: None,
         });
     }
 
@@ -477,6 +478,7 @@ async fn start_download_internal(app: &AppHandle) -> Result<DownloadDonePayload,
             stage_percent: 0.0, overall_percent: 0.0,
             attempt: 1, url: None,
             total_downloaded: 0, total_bytes: total_verify_bytes,
+            speed: None,
         });
 
         for (p, file_label, outcome) in &concurrent_results {
@@ -525,6 +527,7 @@ async fn start_download_internal(app: &AppHandle) -> Result<DownloadDonePayload,
         stage_percent: 100.0, overall_percent: 100.0,
         attempt: 1, url: None,
         total_downloaded: total_pack_bytes, total_bytes: total_pack_bytes,
+            speed: None,
     });
 
     // ========== 阶段 4: 重下校验失败的 pck ==========
@@ -606,6 +609,7 @@ fn emit_progress(
         stage_percent, overall_percent, attempt, url,
         total_downloaded: base_bytes.saturating_add(file_downloaded),
         total_bytes: total_all_bytes,
+            speed: None,
     });
 }
 
@@ -773,6 +777,7 @@ async fn download_to_file_resume(
             stage_percent: 0.0, overall_percent: stage_overall_percent,
             attempt, url: Some(url.to_string()),
             total_downloaded: base_bytes.saturating_add(start_offset), total_bytes: effective_total_bytes,
+            speed: None,
         });
     }
 
@@ -807,6 +812,7 @@ async fn download_to_file_resume(
                 stage_percent: 0.0, overall_percent: stage_overall_percent,
                 attempt, url: Some(url.to_string()),
                 total_downloaded: base_bytes.saturating_add(downloaded), total_bytes: effective_total_bytes,
+            speed: None,
             });
         }
     }
@@ -957,6 +963,7 @@ async fn download_to_file_resume_concurrent(
             stage_percent: 0.0, overall_percent: stage_overall_percent,
             attempt, url: Some(url.to_string()),
             total_downloaded: total_dl, total_bytes: effective_total_bytes,
+            speed: None,
         });
     }
 
@@ -990,6 +997,7 @@ async fn download_to_file_resume_concurrent(
                 stage_percent: 0.0, overall_percent: stage_overall_percent,
                 attempt, url: Some(url.to_string()),
                 total_downloaded: total_dl, total_bytes: effective_total_bytes,
+            speed: None,
             });
         }
     }
@@ -1259,6 +1267,8 @@ async fn download_file_with_chunks(
 
 /// 拉取一个分片：仅下载一次（重试由工作线程外层控制）
 /// stats 在 request/receive 各阶段递增递减
+/// 失败时自动回退 shared_downloaded 和 stats.last_bytes 中已累加的字节，
+/// 确保外层重试不会导致已下载超出总大小。
 async fn pull_chunk(
     worker_id: usize,
     client: &reqwest::Client,
@@ -1291,42 +1301,75 @@ async fn pull_chunk(
     let mut stream = response.bytes_stream();
     let expected_len = end - start + 1;
     let mut received: u64 = 0;
-    let mut first_chunk = true;
+    let mut receiving = false;
     loop {
         let next = match tokio::time::timeout(READ_CHUNK_TIMEOUT, stream.next()).await {
             Ok(Some(item)) => item,
             Ok(None) => break,
             Err(_) => {
-                return Err(format!(
+                // 超时：回退已累加的字节
+                let err_msg = format!(
                     "分片读取超时 (worker={}, bytes={}-{})",
                     worker_id, start, end
-                ));
+                );
+                rollback_chunk_bytes(&shared_downloaded, &stats, received, receiving);
+                return Err(err_msg);
             }
         };
-        let chunk_data = next.map_err(|e| format!("分片读取 chunk 失败: {}", e))?;
+        let chunk_data = match next {
+            Ok(data) => data,
+            Err(e) => {
+                let err_msg = format!("分片读取 chunk 失败: {}", e);
+                rollback_chunk_bytes(&shared_downloaded, &stats, received, receiving);
+                return Err(err_msg);
+            }
+        };
         let n = chunk_data.len();
         if n == 0 { break; }
-        if first_chunk {
-            first_chunk = false;
+        if !receiving {
+            receiving = true;
             stats.inc_receiving();
         }
-        file.write_all(&chunk_data).map_err(|e| format!("分片写文件失败: {}", e))?;
+        if let Err(e) = file.write_all(&chunk_data) {
+            let err_msg = format!("分片写文件失败: {}", e);
+            rollback_chunk_bytes(&shared_downloaded, &stats, received, receiving);
+            return Err(err_msg);
+        }
         received += n as u64;
         shared_downloaded.fetch_add(n as u64, Ordering::Relaxed);
         // 同步累加到 stats.last_bytes，让 monitor 能读到当前进度
         stats.last_bytes.fetch_add(n as u64, Ordering::Relaxed);
     }
 
-    stats.dec_receiving();
-
+    if receiving {
+        stats.dec_receiving();
+    }
 
     if received != expected_len {
-        return Err(format!(
+        let err_msg = format!(
             "分片长度不符: 期望 {} 实际 {}",
             expected_len, received
-        ));
+        );
+        rollback_chunk_bytes(&shared_downloaded, &stats, received, receiving);
+        return Err(err_msg);
     }
     Ok(())
+}
+
+/// 分片失败时回退 shared_downloaded 和 stats.last_bytes 中本分片已累加的字节
+fn rollback_chunk_bytes(
+    shared_downloaded: &AtomicU64,
+    stats: &ThreadStats,
+    received: u64,
+    was_receiving: bool,
+) {
+    if received > 0 {
+        shared_downloaded.fetch_sub(received, Ordering::Relaxed);
+        stats.last_bytes.fetch_sub(received, Ordering::Relaxed);
+    }
+    if was_receiving {
+        stats.dec_receiving();
+    }
 }
 
 
@@ -1362,6 +1405,9 @@ async fn download_file_with_retry_chunks(
     for attempt in 1..=FILE_MAX_ATTEMPTS {
         let url = urls[(attempt - 1) % urls.len()].clone();
 
+        // 记录本次尝试前的 shared_downloaded 快照，失败时恢复到该值
+        let snapshot_before = shared_downloaded.load(Ordering::Relaxed);
+
         // 发初始进度
         let total_dl = shared_downloaded.load(Ordering::Relaxed);
         let _ = emit_download_progress(app, DownloadProgressPayload {
@@ -1371,6 +1417,7 @@ async fn download_file_with_retry_chunks(
             stage_percent: 0.0, overall_percent: stage_overall_percent,
             attempt: attempt as u32, url: Some(url.clone()),
             total_downloaded: total_dl, total_bytes: effective_total_bytes,
+            speed: None,
         });
 
         // 在后台启动一个 500ms 节流的进度推送任务
@@ -1393,6 +1440,7 @@ async fn download_file_with_retry_chunks(
                             stage_percent: 0.0, overall_percent: stage_overall_percent,
                             attempt: attempt_u32, url: Some(url_s.clone()),
                             total_downloaded: total_dl, total_bytes: effective_total_bytes,
+            speed: None,
                         });
                     }
                     _ = &mut stop_rx => { break; }
@@ -1418,6 +1466,8 @@ async fn download_file_with_retry_chunks(
                 // 下载阶段不校验 sha256（留到资源校验阶段统一跑），
                 // 这里只检查文件大小是否正确
                 if size != expected_size {
+                    // 失败：恢复 shared_downloaded 到本次尝试前的值
+                    shared_downloaded.store(snapshot_before, Ordering::Relaxed);
                     let _ = fs::remove_file(local_path);
                     eprintln!(
                         "[Downloader] {} 大小不符: expected={} actual={}",
@@ -1437,11 +1487,14 @@ async fn download_file_with_retry_chunks(
                     stage_percent: 0.0, overall_percent: stage_overall_percent,
                     attempt: attempt as u32, url: None,
                     total_downloaded: total_dl, total_bytes: effective_total_bytes,
+            speed: None,
                 });
                 return DownloadOutcome::Ok { size, sha256: _sha };
             }
 
             Err(e) => {
+                // 恢复 shared_downloaded 到本次尝试前的值
+                shared_downloaded.store(snapshot_before, Ordering::Relaxed);
                 eprintln!("[Downloader] {} 第 {}/{} 次失败: {}", file_label, attempt, FILE_MAX_ATTEMPTS, e);
                 stats.inc_failed();
                 last_err = Some(e.clone());
@@ -1484,20 +1537,41 @@ async fn verify_local_files_internal(app: &AppHandle) -> Result<DownloadDonePayl
     let total_files = manifest.packs.len() + 1;
     let mut done: u32 = 0;
     let mut failed: Vec<String> = Vec::new();
-    let mut downloaded_bytes: u64 = 0;
-    let total_bytes: u64 = manifest.packs.values().map(|p| p.size).sum();
-
-    // exe
+    let packs_total: u64 = manifest.packs.values().map(|p| p.size).sum();
     let exe_path = game_exe_path()?;
+    let exe_size: u64 = fs::metadata(&exe_path).map(|m| m.len()).unwrap_or(0);
+    let total_bytes: u64 = exe_size.saturating_add(packs_total);
+
+    // 发初始进度
+    let _ = emit_download_progress(app, DownloadProgressPayload {
+        stage: "verify".into(), current_file: "game.exe".into(),
+        files_done: 0, files_total: total_files as u32,
+        file_downloaded: 0, file_total: Some(0), file_percent: Some(0.0),
+        stage_percent: 0.0, overall_percent: 0.0,
+        attempt: 1, url: None,
+        total_downloaded: 0, total_bytes, speed: None,
+    });
+
+    // exe — 分块 SHA256 + 字节级进度
     if exe_path.exists() {
-        let size = fs::metadata(&exe_path).map(|m| m.len()).unwrap_or(0);
-        let hash = compute_file_sha256(&exe_path).ok();
+        let hash = compute_file_sha256_with_progress(
+            app, &exe_path, "game.exe", exe_size, 0, total_bytes,
+        );
         let _ = verify_state::upsert_exe(FileVerifyRecord {
-            sha256: hash.clone().unwrap_or_default(), size, status: "ok".into(),
+            sha256: hash.clone().unwrap_or_default(), size: exe_size, status: "ok".into(),
         });
         emit_download_file_done(app, DownloadFileDonePayload {
             stage: "verify".into(), file: "game.exe".into(), ok: true,
-            verify_status: "ok".into(), sha256: hash, size,
+            verify_status: "ok".into(), sha256: hash, size: exe_size,
+        });
+        done += 1;
+        let _ = emit_download_progress(app, DownloadProgressPayload {
+            stage: "verify".into(), current_file: "game.exe".into(),
+            files_done: done, files_total: total_files as u32,
+            file_downloaded: exe_size, file_total: Some(exe_size), file_percent: Some(100.0),
+            stage_percent: 0.0, overall_percent: 0.0,
+            attempt: 1, url: None,
+            total_downloaded: exe_size, total_bytes, speed: None,
         });
     } else {
         let _ = verify_state::upsert_exe(FileVerifyRecord {
@@ -1508,63 +1582,65 @@ async fn verify_local_files_internal(app: &AppHandle) -> Result<DownloadDonePayl
             stage: "verify".into(), file: "game.exe".into(), ok: false,
             verify_status: "missing".into(), sha256: None, size: 0,
         });
+        done += 1;
     }
-    done += 1;
-    let _ = emit_download_progress(app, DownloadProgressPayload {
-        stage: "verify".into(), current_file: "game.exe".into(),
-        files_done: done, files_total: total_files as u32,
-        file_downloaded: 0, file_total: Some(0), file_percent: Some(100.0),
-        stage_percent: percent_of_u64_local(downloaded_bytes, total_bytes),
-        overall_percent: percent_of_u64_local(downloaded_bytes, total_bytes),
-        attempt: 1, url: None,
-        total_downloaded: downloaded_bytes, total_bytes,
-    });
+    tokio::task::yield_now().await;
 
+    // packs — 复用 verify_pack_with_progress 得分块 SHA256 + 字节级进度
+    // verified_bytes 从 exe 大小开始，total_bytes 已包含 exe，保证进度条连续不跳变
+    let mut verified_bytes: u64 = exe_size;
     for (name, info) in manifest.packs.iter() {
         let path = pack_file_path(name).unwrap();
         let file_label = format!("{}{}", name, PACK_FILE_EXT);
+        let p = PackEntry {
+            name: name.clone(),
+            url: String::new(),
+            local_path: path.clone(),
+            expected_sha256: info.sha256.to_lowercase(),
+            expected_size: info.size,
+        };
         if !path.exists() {
             let _ = verify_state::upsert_pack(name, FileVerifyRecord {
                 sha256: info.sha256.clone(), size: info.size, status: "missing".into(),
             });
             failed.push(file_label.clone());
             emit_download_file_done(app, DownloadFileDonePayload {
-                stage: "verify".into(), file: file_label, ok: false,
+                stage: "verify".into(), file: file_label.clone(), ok: false,
                 verify_status: "missing".into(), sha256: None, size: 0,
             });
+            done += 1;
+            verified_bytes = verified_bytes.saturating_add(info.size);
+            let _ = emit_download_progress(app, DownloadProgressPayload {
+                stage: "verify".into(), current_file: file_label,
+                files_done: done, files_total: total_files as u32,
+                file_downloaded: 0, file_total: Some(0), file_percent: Some(100.0),
+                stage_percent: 0.0, overall_percent: 0.0,
+                attempt: 1, url: None,
+                total_downloaded: verified_bytes, total_bytes, speed: None,
+            });
         } else {
-            let size = fs::metadata(&path).map(|m| m.len()).unwrap_or(0);
-            let hash = compute_file_sha256(&path).ok();
-            let ok = matches!(hash.as_ref(),
-                Some(h) if h.to_lowercase() == info.sha256.to_lowercase() && size == info.size);
+            let (ok, actual_hash) = verify_pack_with_progress(
+                app, &p, &file_label, info.size, &mut verified_bytes, total_bytes,
+            );
             let status = if ok { "ok" } else { "mismatch" };
             let _ = verify_state::upsert_pack(name, FileVerifyRecord {
-                sha256: hash.clone().unwrap_or_default(), size, status: status.into(),
+                sha256: actual_hash.clone().unwrap_or_default(), size: info.size, status: status.into(),
             });
             if ok {
                 emit_download_file_done(app, DownloadFileDonePayload {
                     stage: "verify".into(), file: file_label, ok: true,
-                    verify_status: "ok".into(), sha256: hash, size,
+                    verify_status: "ok".into(), sha256: actual_hash, size: info.size,
                 });
             } else {
                 failed.push(file_label.clone());
                 emit_download_file_done(app, DownloadFileDonePayload {
                     stage: "verify".into(), file: file_label, ok: false,
-                    verify_status: "mismatch".into(), sha256: hash, size,
+                    verify_status: "mismatch".into(), sha256: actual_hash, size: info.size,
                 });
             }
+            done += 1;
         }
-        done += 1;
-        downloaded_bytes = downloaded_bytes.saturating_add(info.size);
-        let _ = emit_download_progress(app, DownloadProgressPayload {
-            stage: "verify".into(), current_file: format!("{}{}", name, PACK_FILE_EXT),
-            files_done: done, files_total: total_files as u32,
-            file_downloaded: 0, file_total: Some(0), file_percent: Some(100.0),
-            stage_percent: percent_of_u64_local(downloaded_bytes, total_bytes),
-            overall_percent: percent_of_u64_local(downloaded_bytes, total_bytes),
-            attempt: 1, url: None,
-            total_downloaded: downloaded_bytes, total_bytes,
-        });
+        tokio::task::yield_now().await;
     }
 
     if let Some(v) = manifest.version.as_ref() {
@@ -1626,6 +1702,7 @@ fn verify_pack_with_progress(
                 stage_percent: 0.0, overall_percent: 0.0,
                 attempt: 1, url: None,
                 total_downloaded: *verified_bytes as u64, total_bytes: total_verify_bytes,
+            speed: None,
             });
         }
     }
@@ -1645,6 +1722,69 @@ fn compute_file_sha256(path: &Path) -> Result<String, String> {
         hasher.update(&buf[..n]);
     }
     Ok(hex::encode(hasher.finalize()))
+}
+
+/// 分块 SHA256 计算 + 字节级进度发射（供手动校验使用）
+/// 与 verify_pack_with_progress 类似但直接读本地文件并逐文件上报进度
+fn compute_file_sha256_with_progress(
+    app: &AppHandle,
+    path: &Path,
+    file_label: &str,
+    file_total: u64,
+    verified_bytes_before: u64,
+    total_verify_bytes: u64,
+) -> Option<String> {
+    let mut file = match fs::File::open(path) {
+        Ok(f) => f,
+        Err(e) => {
+            eprintln!("[Verify] 打开 {} 失败: {}", file_label, e);
+            return None;
+        }
+    };
+    let mut hasher = Sha256::new();
+    let mut buf = [0u8; 128 * 1024];
+    let mut read = 0u64;
+    let mut last_emit = std::time::Instant::now();
+    let throttle = std::time::Duration::from_millis(300);
+    loop {
+        let n = match file.read(&mut buf) {
+            Ok(n) => n,
+            Err(e) => {
+                eprintln!("[Verify] 读 {} 失败: {}", file_label, e);
+                return None;
+            }
+        };
+        if n == 0 {
+            break;
+        }
+        hasher.update(&buf[..n]);
+        read += n as u64;
+        if last_emit.elapsed() >= throttle {
+            last_emit = std::time::Instant::now();
+            let total_dl = verified_bytes_before + read;
+            let _ = emit_download_progress(app, DownloadProgressPayload {
+                stage: "verify".into(),
+                current_file: file_label.to_string(),
+                files_done: 0,
+                files_total: 0,
+                file_downloaded: read,
+                file_total: Some(file_total),
+                file_percent: Some(if file_total > 0 {
+                    (read as f32 / file_total as f32) * 100.0
+                } else {
+                    0.0
+                }),
+                stage_percent: 0.0,
+                overall_percent: 0.0,
+                attempt: 1,
+                url: None,
+                total_downloaded: total_dl,
+                total_bytes: total_verify_bytes,
+            speed: None,
+            });
+        }
+    }
+    Some(hex::encode(hasher.finalize()))
 }
 
 /// 给前端读取 verify.json 的轻量 command

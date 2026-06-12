@@ -11,6 +11,9 @@ import { listen } from "../tauri.js";
 
 // ============== 进度条控制 ==============
 
+/// 下载速度追踪器（跨事件计算速度）
+const downloadSpeedTracker = {};
+
 // phase -> 左侧默认文案
 const PHASE_LABEL = {
   init: "正在获取版本信息…",
@@ -62,19 +65,22 @@ export function showProgress(phase) {
 }
 
 /// 仅更新进度条数值
-function setProgress(percent, downloaded, total, attempt, leftOverride) {
+function setProgress(percent, downloaded, total, attempt, leftOverride, speed) {
   const { left, right, fill } = getProgressEls();
   if (leftOverride) {
     left.textContent = leftOverride;
   }
   if (typeof percent === "number" && !Number.isNaN(percent)) {
     const clamped = Math.max(0, Math.min(100, percent));
-    // 右侧显示：百分比 + 已下载/总大小（如果有 total 的话）
     let rightText = `${clamped.toFixed(0)}%`;
     if (total && total > 0 && downloaded != null) {
-      rightText += `  ${formatBytes(downloaded)} / ${formatBytes(total)}`;
+      rightText += `    ${formatBytes(downloaded)} / ${formatBytes(total)}`;
     } else if (downloaded != null && downloaded > 0) {
-      rightText += `  ${formatBytes(downloaded)}`;
+      rightText += `    ${formatBytes(downloaded)}`;
+    }
+    // 显示实时速度
+    if (speed && speed > 0) {
+      rightText += `    ${formatBytes(speed)}/s`;
     }
     right.textContent = rightText;
     fill.style.width = `${clamped}%`;
@@ -164,13 +170,11 @@ export async function setupProgressListeners() {
       if (stage === "exe") {
         leftText = "正在下载主程序…";
       } else if (stage === "packs") {
-        const filesDone = p.files_done || 0;
-        const filesTotal = p.files_total || 0;
         const currentFile = p.current_file || "";
         if (currentFile) {
-          leftText = `正在下载 ${currentFile}  (${filesDone}/${filesTotal})…`;
+          leftText = `正在下载 ${currentFile}…`;
         } else {
-          leftText = `正在下载资源包 (${filesDone}/${filesTotal})…`;
+          leftText = `正在下载资源包…`;
         }
       } else if (stage === "verify") {
         leftText = "正在校验文件…";
@@ -180,7 +184,29 @@ export async function setupProgressListeners() {
       const totalDL = p.total_downloaded || 0;
       const totalBytes = p.total_bytes || 0;
       const bytePercent = totalBytes > 0 ? (totalDL / totalBytes * 100) : p.overall_percent;
-      setProgress(bytePercent, totalDL, totalBytes || null, p.attempt, leftText);
+
+      // 计算下载速度：利用连续事件的 total_downloaded 增量 / 时间差
+      const now = performance.now();
+      const pumperKey = stage + "__speed";
+      if (!downloadSpeedTracker[pumperKey]) {
+        downloadSpeedTracker[pumperKey] = { lastBytes: totalDL, lastTime: now, speed: null };
+      } else {
+        const t = downloadSpeedTracker[pumperKey];
+        const dt = (now - t.lastTime) / 1000; // 秒
+        if (dt > 0.2 && totalDL > t.lastBytes) {
+          t.speed = (totalDL - t.lastBytes) / dt;
+          t.lastBytes = totalDL;
+          t.lastTime = now;
+        } else if (totalDL < t.lastBytes) {
+          // 发生在重试回退或阶段切换，重置
+          t.lastBytes = totalDL;
+          t.lastTime = now;
+          t.speed = null;
+        }
+      }
+      const speed = downloadSpeedTracker[pumperKey]?.speed || null;
+
+      setProgress(bytePercent, totalDL, totalBytes || null, p.attempt, leftText, speed);
     });
 
     // 单文件下载完成事件（仅打印日志，不隐藏进度条）

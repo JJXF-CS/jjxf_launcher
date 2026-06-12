@@ -69,6 +69,9 @@ pub struct DownloadProgressPayload {
     /// 所有文件的总字节数（exe 大小 + 所有 pack 大小之和）
     #[serde(default)]
     pub total_bytes: u64,
+    /// 下载速度（字节/秒），前端用于显示实时速度
+    #[serde(default)]
+    pub speed: Option<f64>,
 }
 
 /// 单个文件下载完成事件

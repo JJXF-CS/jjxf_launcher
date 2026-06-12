@@ -151,6 +151,19 @@ body {
   align-items: flex-end; /* 底部对齐 */
   gap: 40px; /* 进度条和按钮之间的间距 */
   z-index: 100;
+
+  /* 渐变黑色覆盖层：底部不透明向上渐变透明，增强文字可读性 */
+  &::before {
+    content: "";
+    position: absolute;
+    bottom: -40px;
+    left: -100vw;
+    width: 200vw;
+    height: 140px;
+    background: linear-gradient(to top, rgba(0, 0, 0, 0.7) 0%, rgba(0, 0, 0, 0.3) 50%, transparent 100%);
+    pointer-events: none;
+    z-index: -1;
+  }
 }
 
 /* ========== 左侧：进度条区域 ========== */
