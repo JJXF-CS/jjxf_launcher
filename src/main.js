@@ -423,7 +423,15 @@ async function handleVerify() {
     });
     const serverVer = await invoke("parse_manifest_version", { content: serverContent });
 
+    // 同步模块级状态，后续 updateButtonState() 才能拿到最新值
+    serverManifestContent = serverContent;
+    serverManifestVersion = serverVer;
+
     const local = await invoke("read_local_manifest");
+    // 同步本地 manifest 状态（万一期间被改动）
+    localManifestExists = local.exists;
+    localManifestVersion = local.version;
+
     if (!local.exists) {
       finishProgress("本地未安装游戏");
       await showAlert("本地未安装游戏，无需校验", { title: "提示", type: "info" });
@@ -442,6 +450,8 @@ async function handleVerify() {
         `校验失败：版本不一致\n本地版本: ${local.version}\n服务端版本: ${serverVer}\n请重新下载或更新游戏`,
         { title: "校验失败", type: "error" }
       );
+      // 版本不一致：强制刷新按钮状态，把“开始游戏”切换为“更新游戏”
+      refreshLauncherState();
     }
   } catch (e) {
     console.error("[Launcher] 校验失败:", e);

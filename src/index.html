@@ -76,26 +76,26 @@
 
       </div>
     </main>
-  </div>
 
-  <!-- 自制弹窗容器 (默认隐藏) -->
-  <div class="modal-overlay" id="modal-overlay" aria-hidden="true">
-    <div class="modal-card" role="dialog" aria-modal="true" aria-labelledby="modal-title">
-      <div class="modal-icon" id="modal-icon" aria-hidden="true">
-        <svg viewBox="0 0 24 24" width="22" height="22" stroke="currentColor" stroke-width="2" fill="none"
-          stroke-linecap="round" stroke-linejoin="round">
-          <circle cx="12" cy="12" r="10"></circle>
-          <line x1="12" y1="8" x2="12" y2="12"></line>
-          <line x1="12" y1="16" x2="12.01" y2="16"></line>
-        </svg>
-      </div>
-      <div class="modal-content">
-        <h3 class="modal-title" id="modal-title">提示</h3>
-        <div class="modal-message" id="modal-message"></div>
-      </div>
-      <div class="modal-actions" id="modal-actions">
-        <button class="modal-btn modal-btn-default" id="modal-btn-cancel" hidden>取消</button>
-        <button class="modal-btn modal-btn-primary" id="modal-btn-ok">确定</button>
+    <!-- 自制弹窗容器 (默认隐藏) - 位于 .app 内部，与窗口同 DOM 边界，吃到 .app 的圆角 -->
+    <div class="modal-overlay" id="modal-overlay" aria-hidden="true">
+      <div class="modal-card" role="dialog" aria-modal="true" aria-labelledby="modal-title">
+        <div class="modal-icon" id="modal-icon" aria-hidden="true">
+          <svg viewBox="0 0 24 24" width="22" height="22" stroke="currentColor" stroke-width="2" fill="none"
+            stroke-linecap="round" stroke-linejoin="round">
+            <circle cx="12" cy="12" r="10"></circle>
+            <line x1="12" y1="8" x2="12" y2="12"></line>
+            <line x1="12" y1="16" x2="12.01" y2="16"></line>
+          </svg>
+        </div>
+        <div class="modal-content">
+          <h3 class="modal-title" id="modal-title">提示</h3>
+          <div class="modal-message" id="modal-message"></div>
+        </div>
+        <div class="modal-actions" id="modal-actions">
+          <button class="modal-btn modal-btn-default" id="modal-btn-cancel" hidden>取消</button>
+          <button class="modal-btn modal-btn-primary" id="modal-btn-ok">确定</button>
+        </div>
       </div>
     </div>
   </div>
