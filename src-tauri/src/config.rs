@@ -16,24 +16,20 @@ pub const FILE_MAX_ATTEMPTS: usize = 3;
 /// 服务端域名配置：主用 oss.jjxf.cc，备用 update.jjxf.cc
 pub const PRIMARY_HOST: &str = "https://oss.jjxf.cc";
 pub const BACKUP_HOST: &str = "https://update.jjxf.cc";
-/// manifest.json 相对路径
-pub const MANIFEST_PATH: &str = "/True_Pcks/manifest.json";
+/// manifest.json 现在直接位于服务器根目录下
+pub const MANIFEST_PATH: &str = "/manifest.json";
 /// 最多重试次数（包含主用域名 + 备用域名，最多 3 次整体尝试）
 pub const MAX_ATTEMPTS: usize = 3;
 
 // ============== 下载相关路径配置 ==============
-// 下面这些常量是「可被业务方按需修改」的位置：
-// 1) 以后游戏可能改名为 launcher.exe / client.exe 之类 → 改 GAME_EXE_NAME
-// 2) 资源不一定都放在 True_Pcks/ 下了，可能以后在 CDN 的 /v1/packs/ 或 /hot_update/ 之类
-//    → 改 PACKS_URL_PREFIX；也可以根据不同版本分目录存放
-// 3) 如果以后 exe 也迁到 hot_update/ 之类的子目录 → 改 EXE_URL_PREFIX
-//
-// 现阶段保持从 True_Pcks/ 拉取（与 manifest.json 同目录），并加 .pck 后缀。
+// 路径常量说明：
+//   - manifest 中新增 `path` 字段（例如 "0.8.2.9_6_13"），所有资源文件都放在该子目录下
+//   - exe:  {host}/{manifest.path}/game.exe
+//   - pack: {host}/{manifest.path}/{pack_name}.pck
+//   若 manifest 中缺少 path 字段，则回退使用 "True_Pcks" 作为默认路径前缀
 
-/// 游戏主程序相对服务器路径（不含域名）。例如 "/True_Pcks/game.exe"
-pub const EXE_URL_PATH: &str = "/True_Pcks/game.exe";
-/// 资源包 URL 前缀，最终拼成 "{prefix}/{pack_name}.pck"，例如 "https://oss.jjxf.cc/True_Pcks/Arts.pck"
-pub const PACKS_URL_PREFIX: &str = "/True_Pcks";
+/// manifest 中缺少 path 字段时的默认回退路径前缀
+pub const DEFAULT_PACKS_PATH: &str = "True_Pcks";
 /// 资源包文件后缀
 pub const PACK_FILE_EXT: &str = ".pck";
 
@@ -59,13 +55,10 @@ pub const EVT_DOWNLOAD_ERROR: &str = "download:error";
 /// 单文件多线程分片下载的并发线程数（IDM 风格）
 pub const FILE_CHUNK_CONCURRENCY: usize = 36;
 /// 启用多线程分片的最小文件大小（小于此值走单线程）
-pub const CHUNK_MIN_FILE_SIZE: u64 = 512 * 1024; // 1MB
+pub const CHUNK_MIN_FILE_SIZE: u64 = 512 * 1024; // 512KB
 /// 单个分片的最小字节数（IDM 风格：根据文件总大小动态算）
 pub const CHUNK_MIN_SIZE: u64 = 256 * 1024; // 256KB
 /// 单个分片连续失败达到此次数后才认为该分片彻底失败
 pub const CHUNK_MAX_CONSECUTIVE_FAILS: u32 = 5;
 /// 一次下载中重试的退避初始延迟（后续翻倍）
 pub const CHUNK_RETRY_BASE_MS: u64 = 200;
-
-
-

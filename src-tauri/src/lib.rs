@@ -58,6 +58,7 @@ pub fn run() {
             downloader::verify_local_files,
             downloader::read_verify_state,
             downloader::clear_verify_state,
+            downloader::check_update_needed,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

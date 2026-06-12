@@ -22,8 +22,8 @@ use sha2::{Digest, Sha256};
 use tauri::AppHandle;
 use crate::config::{
     BACKUP_HOST, CHUNK_MAX_CONSECUTIVE_FAILS, CHUNK_MIN_FILE_SIZE, CHUNK_MIN_SIZE,
-    CHUNK_RETRY_BASE_MS, CONNECT_TIMEOUT, EXE_URL_PATH, FILE_CHUNK_CONCURRENCY,
-    FILE_MAX_ATTEMPTS, PACKS_URL_PREFIX, PACK_FILE_EXT, PRIMARY_HOST, READ_CHUNK_TIMEOUT,
+    CHUNK_RETRY_BASE_MS, CONNECT_TIMEOUT, DEFAULT_PACKS_PATH, FILE_CHUNK_CONCURRENCY,
+    FILE_MAX_ATTEMPTS, GAME_EXE_NAME, PACK_FILE_EXT, PRIMARY_HOST, READ_CHUNK_TIMEOUT,
 };
 
 
@@ -47,10 +47,22 @@ struct PackInfo {
 }
 
 #[derive(Debug, Deserialize)]
+struct ExeInfo {
+    sha256: String,
+    size: u64,
+    #[serde(default)]
+    version: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
 struct ManifestFile {
     packs: std::collections::BTreeMap<String, PackInfo>,
     #[serde(default)]
+    exe: Option<ExeInfo>,
+    #[serde(default)]
     version: Option<String>,
+    #[serde(default)]
+    path: Option<String>,
 }
 
 #[derive(Debug, Clone)]
@@ -233,9 +245,17 @@ async fn start_download_internal(app: &AppHandle) -> Result<DownloadDonePayload,
     let manifest: ManifestFile = serde_json::from_str(&content)
         .map_err(|e| format!("解析本地 manifest.json 失败: {}", e))?;
 
-    // 2) 构建下载任务列表
+    // 2) 确定服务端资源路径前缀
+    //    新格式: manifest 中 `path` 字段指定了所有资源所在的子目录（如 "0.8.2.9_6_13"）
+    //    旧格式回退: 若无 path 字段则使用 DEFAULT_PACKS_PATH（"True_Pcks"）
+    let packs_path = manifest
+        .path
+        .as_deref()
+        .unwrap_or(DEFAULT_PACKS_PATH);
+
+    // 3) 构建下载任务列表
     let exe = ExeEntry {
-        url: format!("{}{}", PRIMARY_HOST, EXE_URL_PATH),
+        url: format!("{}/{}/{}", PRIMARY_HOST, packs_path, GAME_EXE_NAME),
         local_path: game_exe_path()?,
     };
     let packs: Vec<PackEntry> = manifest
@@ -244,8 +264,8 @@ async fn start_download_internal(app: &AppHandle) -> Result<DownloadDonePayload,
         .map(|(name, info)| PackEntry {
             name: name.clone(),
             url: format!(
-                "{}{}/{}{}",
-                PRIMARY_HOST, PACKS_URL_PREFIX, name, PACK_FILE_EXT
+                "{}/{}/{}{}",
+                PRIMARY_HOST, packs_path, name, PACK_FILE_EXT
             ),
             local_path: pack_file_path(name).unwrap(),
             expected_sha256: info.sha256.to_lowercase(),
@@ -256,24 +276,38 @@ async fn start_download_internal(app: &AppHandle) -> Result<DownloadDonePayload,
     // 3) 计算 pack 总大小（HEAD 请求 + 后续下载都需要）
     let total_pack_bytes: u64 = packs.iter().map(|p| p.expected_size).sum();
 
-    // 4) 读取 verify.json 现状
+    // 4) 读取 verify.json 现状，并用 manifest 中的 sha256 做精确比对
+    //    仅在 verify.json status=="ok" 且 sha256 与 manifest 一致时才认为该文件已完成
     let verify = verify_state::load();
-    let exe_already_ok = verify_state::is_exe_ok(&verify);
+    let exe_already_ok = if let Some(ref exe_info) = manifest.exe {
+        verify_state::is_exe_sha256_match(&verify, &exe_info.sha256)
+            && verify_state::is_manifest_path_match(&verify, packs_path)
+    } else {
+        // 旧格式 manifest 无 exe 字段，回退到仅检查 status
+        verify_state::is_exe_ok(&verify)
+    };
     let pack_already_ok: std::collections::HashSet<String> = packs
         .iter()
-        .filter(|p| verify_state::is_pack_ok(&verify, &p.name))
+        .filter(|p| verify_state::is_pack_sha256_match(&verify, &p.name, &p.expected_sha256))
         .map(|p| p.name.clone())
         .collect();
 
+    // 同时清除那些 status=="ok" 但 sha256 已变、或 path 已变的旧记录
+    // （这批文件会在本轮下载中重新拉取并覆盖记录）
+    let manifest_path_changed = !verify_state::is_manifest_path_match(&verify, packs_path);
+    if manifest_path_changed {
+        eprintln!("[Downloader] manifest path 已变更 (旧={:?} 新={})，将重新下载所有文件", verify.manifest_path, packs_path);
+    }
+
     if let Some(v) = manifest.version.as_ref() {
-        let _ = verify_state::set_manifest_version(v);
+        let _ = verify_state::set_manifest_version_and_path(v, packs_path);
     }
 
     // ========== 阶段 1: 下载 game.exe ==========
     let mut failed_files: Vec<String> = Vec::new();
 
     // exe 阶段：获取 exe 大小（如果 HEAD 返回 0 则用 Range GET 抓首块推算）
-    let exe_url = format!("{}{}", PRIMARY_HOST, EXE_URL_PATH);
+    let exe_url = exe.url.clone();
     let exe_total: u64 = {
         let probe_client = reqwest::Client::builder()
             .user_agent("jjxf_launcher/0.1.0")
@@ -322,52 +356,92 @@ async fn start_download_internal(app: &AppHandle) -> Result<DownloadDonePayload,
 
     let total_all_bytes = exe_total + total_pack_bytes;
 
+    // exe 下载 + sha256 校验循环（最多重试 FILE_MAX_ATTEMPTS 次）
+    let mut exe_attempt = 0;
+    let expected_exe_sha256 = manifest.exe.as_ref().map(|ei| ei.sha256.to_lowercase());
+
     if !exe_already_ok {
-        emit_progress(
-            app, "exe", &exe.local_path, 0, 1, 0, if exe_total > 0 { Some(exe_total) } else { None }, 0.0, 0.0, 1,
-            Some(exe.url.clone()), 0, exe_total,
-        );
+        loop {
+            exe_attempt += 1;
 
-        let current_file_label = "game.exe".to_string();
-        // exe 阶段：为多线程分片创建一个仅跟踪 exe 本身的原子计数器
-        let exe_shared = Arc::new(AtomicU64::new(0));
-
-        // 若已知 exe_total >= CHUNK_MIN_FILE_SIZE，走分片下载；否则走原单线程
-        let result = if exe_total > 0 && should_use_chunks(exe_total) {
-            download_file_with_retry_chunks(
-                app, &exe.url, &exe.local_path,
-                exe_total, None,
-                "exe", &current_file_label, 0, 1, 0.0,
-                exe_shared.clone(), exe_total,
-            ).await
-        } else {
-            download_file_with_retry(
-                app, &exe.url, &exe.local_path, None, None,
-                "exe", &current_file_label, 0, 1, 0.0,
-                0, exe_total,
-            ).await
-        };
-
-        match result {
-            DownloadOutcome::Ok { size, sha256 } => {
-                let rec = FileVerifyRecord {
-                    sha256: sha256.clone().unwrap_or_default(),
-                    size, status: "ok".into(),
-                };
-                let _ = verify_state::upsert_exe(rec);
-                emit_download_file_done(app, DownloadFileDonePayload {
-                    stage: "exe".into(), file: "game.exe".into(), ok: true,
-                    verify_status: "ok".into(), sha256, size,
-                });
-                emit_progress(app, "exe", &exe.local_path, 1, 1, size, Some(size), 100.0, EXE_STAGE_WEIGHT, 1, None, 0, exe_total);
+            // 重试前先删除旧文件（否则断点续传短路由会跳过下载）
+            if exe_attempt > 1 {
+                let _ = fs::remove_file(&exe.local_path);
             }
-            DownloadOutcome::Err(e) => {
-                failed_files.push("game.exe".to_string());
-                emit_download_error(app, DownloadErrorPayload {
-                    stage: "exe".into(), file: Some("game.exe".into()),
-                    url: Some(exe.url.clone()), message: e.clone(),
-                });
-                return Ok(DownloadDonePayload { ok: false, message: format!("下载 game.exe 失败: {}", e), failed_files });
+
+            emit_progress(
+                app, "exe", &exe.local_path, 0, 1, 0, if exe_total > 0 { Some(exe_total) } else { None }, 0.0, 0.0, exe_attempt as u32,
+                Some(exe.url.clone()), 0, exe_total,
+            );
+
+            let current_file_label = "game.exe".to_string();
+            let exe_shared = Arc::new(AtomicU64::new(0));
+
+            let result = if exe_total > 0 && should_use_chunks(exe_total) {
+                download_file_with_retry_chunks(
+                    app, &exe.url, &exe.local_path,
+                    exe_total, None,
+                    "exe", &current_file_label, 0, 1, 0.0,
+                    exe_shared.clone(), exe_total,
+                ).await
+            } else {
+                download_file_with_retry(
+                    app, &exe.url, &exe.local_path, None, None,
+                    "exe", &current_file_label, 0, 1, 0.0,
+                    0, exe_total,
+                ).await
+            };
+
+            match result {
+                DownloadOutcome::Ok { size, sha256 } => {
+                    // 校验 sha256（如果 manifest 中有 exe.sha256）
+                    let computed = compute_file_sha256(&exe.local_path).ok();
+                    let sha256_ok = match (&expected_exe_sha256, &computed) {
+                        (Some(expected), Some(actual)) => {
+                            actual.to_lowercase() == *expected
+                        }
+                        _ => true, // 无预期 sha256 或无法计算，跳过校验
+                    };
+
+                    if sha256_ok {
+                        let actual_sha = computed.clone().unwrap_or_default();
+                        let rec = FileVerifyRecord {
+                            sha256: actual_sha.clone(),
+                            size, status: "ok".into(),
+                        };
+                        let _ = verify_state::upsert_exe(rec);
+                        emit_download_file_done(app, DownloadFileDonePayload {
+                            stage: "exe".into(), file: "game.exe".into(), ok: true,
+                            verify_status: "ok".into(), sha256: Some(actual_sha), size,
+                        });
+                        emit_progress(app, "exe", &exe.local_path, 1, 1, size, Some(size), 100.0, EXE_STAGE_WEIGHT, exe_attempt as u32, None, 0, exe_total);
+                        break;
+                    } else {
+                        eprintln!("[Downloader] game.exe sha256 不匹配 (第{}次): expected={:?} actual={:?}",
+                            exe_attempt, expected_exe_sha256, computed);
+                        let _ = fs::remove_file(&exe.local_path);
+                        if exe_attempt >= FILE_MAX_ATTEMPTS as usize {
+                            failed_files.push("game.exe".to_string());
+                            emit_download_error(app, DownloadErrorPayload {
+                                stage: "exe".into(), file: Some("game.exe".into()),
+                                url: Some(exe.url.clone()),
+                                message: format!("sha256 不匹配: expected={:?} actual={:?}", expected_exe_sha256, computed),
+                            });
+                            return Ok(DownloadDonePayload { ok: false, message: format!("下载 game.exe 失败: sha256 校验不匹配"), failed_files });
+                        }
+                    }
+                }
+                DownloadOutcome::Err(e) => {
+                    if exe_attempt >= FILE_MAX_ATTEMPTS as usize {
+                        failed_files.push("game.exe".to_string());
+                        emit_download_error(app, DownloadErrorPayload {
+                            stage: "exe".into(), file: Some("game.exe".into()),
+                            url: Some(exe.url.clone()), message: e.clone(),
+                        });
+                        return Ok(DownloadDonePayload { ok: false, message: format!("下载 game.exe 失败: {}", e), failed_files });
+                    }
+                    eprintln!("[Downloader] game.exe 下载失败 (第{}次): {}", exe_attempt, e);
+                }
             }
         }
     } else {
@@ -540,7 +614,10 @@ async fn start_download_internal(app: &AppHandle) -> Result<DownloadDonePayload,
         }
 
         // 复用同一个 packs 下载逻辑
+        // ⚠️ 重要：必须先删除旧文件，否则 download_*_resume 的断点续传短路
+        //     会检测到文件已存在且大小匹配，直接返回旧文件不重新下载
         for p in to_redownload.iter().cloned() {
+            let _ = fs::remove_file(&p.local_path);
             let file_label = format!("{}{}", p.name, PACK_FILE_EXT);
             let pack_pct = percent_of_packs(shared_downloaded.load(Ordering::Relaxed), total_pack_bytes);
             let pack_overall = compute_overall_percent(true, pack_pct);
@@ -562,8 +639,50 @@ async fn start_download_internal(app: &AppHandle) -> Result<DownloadDonePayload,
 
             match outcome {
                 DownloadOutcome::Ok { size, .. } => {
-                    // 重下后只补加字节计数
+                    // 重下成功后必须重新校验 sha256 并更新 verify.json
+                    // 否则 verify.json 永远停留在 "mismatch"，下次启动又会重下同一文件
+                    let actual_hash = compute_file_sha256(&p.local_path).ok();
+                    let ok = actual_hash.as_ref().map_or(false, |h| {
+                        h.to_lowercase() == p.expected_sha256.to_lowercase()
+                    });
+
                     shared_downloaded.fetch_add(size, Ordering::Relaxed);
+
+                    let actual_for_log = actual_hash.clone();
+                    if ok {
+                        let rec = FileVerifyRecord {
+                            sha256: actual_hash.clone().unwrap_or_default(),
+                            size: p.expected_size,
+                            status: "ok".into(),
+                        };
+                        let _ = verify_state::upsert_pack(&p.name, rec);
+                        emit_download_file_done(app, DownloadFileDonePayload {
+                            stage: "verify".into(),
+                            file: file_label.clone(),
+                            ok: true,
+                            verify_status: "ok".into(),
+                            sha256: actual_hash,
+                            size: p.expected_size,
+                        });
+                        eprintln!("[Downloader] 重下 {} 成功，sha256 校验通过", file_label);
+                    } else {
+                        failed_files.push(file_label.clone());
+                        let _ = verify_state::upsert_pack(&p.name, FileVerifyRecord {
+                            sha256: actual_hash.clone().unwrap_or_default(),
+                            size: p.expected_size,
+                            status: "mismatch".into(),
+                        });
+                        emit_download_file_done(app, DownloadFileDonePayload {
+                            stage: "verify".into(),
+                            file: file_label.clone(),
+                            ok: false,
+                            verify_status: "mismatch".into(),
+                            sha256: actual_hash,
+                            size: p.expected_size,
+                        });
+                        eprintln!("[Downloader] 重下 {} 后 sha256 仍不匹配: expected={} actual={:?}",
+                            file_label, p.expected_sha256, actual_for_log);
+                    }
                 }
                 DownloadOutcome::Err(e) => {
                     failed_files.push(file_label.clone());
@@ -574,9 +693,6 @@ async fn start_download_internal(app: &AppHandle) -> Result<DownloadDonePayload,
                 }
             }
         }
-
-        // 重新跑一轮资源校验（快速：只需检查这批重下过的 pck）
-        // 为了简化与原流程一致，只在最终汇总时告知
     }
 
     if failed_files.is_empty() {
@@ -1644,7 +1760,11 @@ async fn verify_local_files_internal(app: &AppHandle) -> Result<DownloadDonePayl
     }
 
     if let Some(v) = manifest.version.as_ref() {
-        let _ = verify_state::set_manifest_version(v);
+        let packs_path = manifest
+            .path
+            .as_deref()
+            .unwrap_or(DEFAULT_PACKS_PATH);
+        let _ = verify_state::set_manifest_version_and_path(v, packs_path);
     }
 
     Ok(DownloadDonePayload {
@@ -1810,6 +1930,61 @@ pub fn read_verify_state() -> Result<VerifyStateInfo, String> {
         exe_ok: verify_state::is_exe_ok(&state), packs,
         manifest_version: state.manifest_version.clone(),
         exists: path.exists(), pack_names,
+    })
+}
+
+/// 检查是否需要更新：比较服务端 manifest 与本地 verify.json 的 sha256/path
+/// 返回需要更新的文件列表（即使 version 相同，sha256 或 path 不同也需要更新）
+#[derive(serde::Serialize)]
+pub struct UpdateCheckResult {
+    pub needs_update: bool,
+    /// 需要更新的文件列表："game.exe" 或 "Arts.pck" 等
+    pub outdated_files: Vec<String>,
+    /// 服务端版本号
+    pub server_version: Option<String>,
+    /// 本地版本号
+    pub local_version: Option<String>,
+    /// manifest path 是否变更（变更时需要重新下载所有文件）
+    pub path_changed: bool,
+}
+
+#[tauri::command]
+pub fn check_update_needed(server_manifest_content: String) -> Result<UpdateCheckResult, String> {
+    let manifest: ManifestFile = serde_json::from_str(&server_manifest_content)
+        .map_err(|e| format!("解析服务端 manifest 失败: {}", e))?;
+
+    let verify = verify_state::load();
+    let packs_path = manifest.path.as_deref().unwrap_or(DEFAULT_PACKS_PATH);
+
+    let path_changed = !verify_state::is_manifest_path_match(&verify, packs_path);
+    let mut outdated_files: Vec<String> = Vec::new();
+
+    // 检查 exe
+    if let Some(ref exe_info) = manifest.exe {
+        if !verify_state::is_exe_sha256_match(&verify, &exe_info.sha256) || path_changed {
+            outdated_files.push("game.exe".to_string());
+        }
+    } else if !verify_state::is_exe_ok(&verify) {
+        outdated_files.push("game.exe".to_string());
+    }
+
+    // 检查 packs
+    for (name, info) in &manifest.packs {
+        let expected_sha256 = info.sha256.to_lowercase();
+        if path_changed || !verify_state::is_pack_sha256_match(&verify, name, &expected_sha256) {
+            outdated_files.push(format!("{}{}", name, PACK_FILE_EXT));
+        }
+    }
+
+    // 如果 manifest path 变更，也检查之前 verify.json 中的 packs 是否存在但 manifest 中没有的
+    // （这种情况一般不会发生，但如果发生，path_changed 已经处理了重下所有文件）
+
+    Ok(UpdateCheckResult {
+        needs_update: !outdated_files.is_empty(),
+        outdated_files,
+        server_version: manifest.version.clone(),
+        local_version: verify.manifest_version.clone(),
+        path_changed,
     })
 }
 

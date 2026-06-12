@@ -14,6 +14,12 @@ let verifyState = null;
 // 按钮状态：download / continue_download / update / play
 let currentButtonState = "download";
 
+// 是否需要更新（通过 check_update_needed 检测 sha256 / path 变更）
+let needsUpdate = false;
+
+// 需要更新的文件列表（如 ["game.exe", "Arts.pck"]）
+let outdatedFiles = [];
+
 // 菜单卡片相关
 let isMenuOpen = false;
 
@@ -113,4 +119,20 @@ export function getLastPrimaryButtonText() {
 
 export function setLastPrimaryButtonText(v) {
   lastPrimaryButtonText = v;
+}
+
+export function getNeedsUpdate() {
+  return needsUpdate;
+}
+
+export function setNeedsUpdate(v) {
+  needsUpdate = v;
+}
+
+export function getOutdatedFiles() {
+  return outdatedFiles;
+}
+
+export function setOutdatedFiles(v) {
+  outdatedFiles = v;
 }

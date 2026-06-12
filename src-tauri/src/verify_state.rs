@@ -35,6 +35,9 @@ pub struct VerifyState {
     /// 服务端 manifest 版本号
     #[serde(default)]
     pub manifest_version: Option<String>,
+    /// 服务端 manifest 中的 path 字段（资源所在子目录，如 "0.8.2.9_6_13"）
+    #[serde(default)]
+    pub manifest_path: Option<String>,
     /// 资源包相对路径 -> 记录（"Arts" / "Json" / ...）
     #[serde(default)]
     pub packs: BTreeMap<String, FileVerifyRecord>,
@@ -89,6 +92,15 @@ pub fn upsert_exe(record: FileVerifyRecord) -> Result<(), String> {
     save(&state)
 }
 
+/// 同时记录 manifest_version 和 path（一般只在确定要写其他字段时一起写）
+pub fn set_manifest_version_and_path(version: &str, path: &str) -> Result<(), String> {
+    let mut state = load();
+    state.manifest_version = Some(version.to_string());
+    state.manifest_path = Some(path.to_string());
+    state.updated_at = Some(current_rfc3339());
+    save(&state)
+}
+
 /// 同时记录 manifest_version（一般只在确定要写其他字段时一起写）
 pub fn set_manifest_version(version: &str) -> Result<(), String> {
     let mut state = load();
@@ -106,12 +118,39 @@ pub fn is_pack_ok(state: &VerifyState, name: &str) -> bool {
         .unwrap_or(false)
 }
 
-/// exe 是否 ok
+/// exe 是否 ok（且 sha256 与预期一致）
 pub fn is_exe_ok(state: &VerifyState) -> bool {
     state
         .exe
         .as_ref()
         .map(|r| r.status == "ok")
+        .unwrap_or(false)
+}
+
+/// 检查 exe 的 sha256 是否与给定的预期值一致（用于热更新检测）
+pub fn is_exe_sha256_match(state: &VerifyState, expected_sha256: &str) -> bool {
+    state
+        .exe
+        .as_ref()
+        .map(|r| r.status == "ok" && r.sha256.to_lowercase() == expected_sha256.to_lowercase())
+        .unwrap_or(false)
+}
+
+/// 检查 pack 的 sha256 是否与给定的预期值一致
+pub fn is_pack_sha256_match(state: &VerifyState, name: &str, expected_sha256: &str) -> bool {
+    state
+        .packs
+        .get(name)
+        .map(|r| r.status == "ok" && r.sha256.to_lowercase() == expected_sha256.to_lowercase())
+        .unwrap_or(false)
+}
+
+/// 检查 manifest path 是否与给定值一致
+pub fn is_manifest_path_match(state: &VerifyState, expected_path: &str) -> bool {
+    state
+        .manifest_path
+        .as_ref()
+        .map(|p| p == expected_path)
         .unwrap_or(false)
 }
 
