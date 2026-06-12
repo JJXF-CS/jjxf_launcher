@@ -1,0 +1,577 @@
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+html, body {
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  user-select: none;
+  background: transparent;
+}
+
+.app {
+  width: 100%;
+  height: 100%;
+  border-radius: 12px;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  background-color: #00000000;
+  background-image: url('assets/img/bg.jpg');
+  background-size: cover;
+  background-position: center;
+}
+
+body {
+  color: #e0e0e0;
+  border-radius: 12px;
+}
+
+/* ========== 沉浸式顶栏 ========== */
+.titlebar {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 36px;
+
+  /* 关键 1：允许拖动窗口 */
+  -webkit-app-region: drag;
+
+  /* 关键 2：禁止文字选中 */
+  user-select: none;
+  -webkit-user-select: none; /* Safari/Chrome 兼容 */
+  -moz-user-select: none;    /* Firefox 兼容 */
+
+  cursor: default;
+  background-color: transparent;
+
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 12px;
+  z-index: 1000;
+}
+
+/* 标题文字 */
+.titlebar .title {
+  font-size: 13px;
+  font-weight: 400;
+  color: rgba(255, 255, 255, 0.7);
+  letter-spacing: 0.5px;
+
+  /* 确保标题本身也不可选中 */
+  pointer-events: none; /* 可选：让鼠标事件穿透标题文字，直接作用于父级拖动区 */
+}
+
+/* 窗口控制按钮区域 */
+.window-controls {
+  display: flex;
+  gap: 2px;
+}
+
+/* 控制按钮 */
+.window-controls button {
+  /* 关键 3：按钮必须可交互，所以不能设 user-select: none 影响点击，但通常按钮默认就不选中 */
+  -webkit-app-region: no-drag;
+
+  width: 36px;
+  height: 36px;
+  border: none;
+  background: transparent;
+  color: rgba(255, 255, 255, 0.6);
+  font-size: 16px;
+  cursor: pointer;
+  border-radius: 0;
+  transition: all 0.15s ease;
+
+  display: flex;
+  align-items: center;
+  justify-content: center;
+
+  /* 禁止按钮文字选中 */
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+/* 悬停效果 */
+.window-controls button:hover {
+  background-color: rgba(255, 255, 255, 0.08);
+  color: rgba(255, 255, 255, 0.9);
+}
+
+#btn-close:hover {
+  background-color: rgba(231, 76, 60, 0.8);
+  color: #ffffff;
+}
+
+.window-controls button:active {
+  background-color: rgba(255, 255, 255, 0.15);
+}
+
+/* ========== 主内容区域 ========== */
+.container {
+  padding-top: 36px;
+  height: 100vh;
+  overflow-y: auto;
+  user-select: text;
+}
+
+/* 极简滚动条 */
+.container::-webkit-scrollbar {
+  width: 6px;
+}
+
+.container::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.1);
+  border-radius: 3px;
+}
+
+.container::-webkit-scrollbar-thumb:hover {
+  background: rgba(255, 255, 255, 0.2);
+}
+
+/* ... 你之前的全局、顶栏、滚动条样式保持不变 ... */
+
+/* ========== 右下角整体操作区 ========== */
+.bottom-action-wrapper {
+  position: fixed;
+  bottom: 40px;
+  right: 50px;
+  display: flex;
+  align-items: flex-end; /* 底部对齐 */
+  gap: 40px; /* 进度条和按钮之间的间距 */
+  z-index: 100;
+}
+
+/* ========== 左侧：进度条区域 ========== */
+.progress-section {
+  /* 初始状态：宽度为0，透明度为0，实现隐藏 */
+  width: 0;
+  opacity: 0;
+  overflow: hidden;
+
+  /* 动画过渡 */
+  transition: all 0.4s cubic-bezier(0.4, 0, 0.2, 1);
+
+  /* 布局 */
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-end;
+  min-width: 550px; /* 展开后的最小宽度 */
+}
+
+/* 当添加 .visible 类时显示 */
+.progress-section.visible {
+  width: 550px; /* 展开宽度 */
+  opacity: 1;
+}
+
+/* 进度条上方文字信息 */
+.progress-info {
+  display: flex;
+  justify-content: space-between;
+  margin-bottom: 6px;
+  font-size: 12px;
+  color: rgba(255, 255, 255, 0.7);
+  text-shadow: 0 1px 2px rgba(0,0,0,0.5);
+}
+
+.progress-label-left {
+  text-align: left;
+}
+
+.progress-label-right {
+  text-align: right;
+  font-weight: bold;
+  color: #fff;
+}
+
+/* 进度条轨道 */
+.progress-track {
+  height: 6px;
+  background-color: rgba(0, 0, 0, 0.3);
+  border-radius: 3px;
+  overflow: hidden;
+  backdrop-filter: blur(4px);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+/* 进度条填充 */
+.progress-fill {
+  height: 100%;
+  background: linear-gradient(90deg, #d84500, #ff7b00);
+  border-radius: 3px;
+  transition: width 0.3s ease;
+  box-shadow: 0 0 8px rgba(216, 69, 0, 0.5);
+}
+
+/* ========== 右侧：复合按钮 (保持原样，微调) ========== */
+.bottom-action-bar {
+  display: flex;
+  gap: 0;
+  border-radius: 8px;
+  overflow: hidden;
+  box-shadow: 0 4px 15px rgba(0, 0, 0, 0.3);
+  flex-shrink: 0; /* 防止被压缩 */
+}
+
+.action-btn {
+  border: none;
+  outline: none;
+  cursor: pointer;
+  font-family: inherit;
+  transition: all 0.2s ease;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.action-btn.primary {
+  background-color: #d84500;
+  color: white;
+  padding: 12px 24px;
+  font-size: 14px;
+  font-weight: 600;
+  letter-spacing: 0.5px;
+  min-width: 120px;
+}
+
+.action-btn.primary:hover {
+  background-color: #e55a1a;
+}
+
+/* ========== 主按钮 loading / disabled 态（变灰不可点） ========== */
+.action-btn.primary.loading,
+.action-btn.primary:disabled {
+  background-color: #6e6e6e;
+  color: rgba(255, 255, 255, 0.85);
+  cursor: not-allowed;
+  box-shadow: none;
+  position: relative;
+}
+
+.action-btn.primary.loading:hover,
+.action-btn.primary:disabled:hover {
+  background-color: #6e6e6e;
+}
+
+/* 用一个伪元素表现 loading 动效，避免影响文字布局 */
+.action-btn.primary.loading::after {
+  content: "";
+  position: absolute;
+  right: 12px;
+  top: 50%;
+  width: 12px;
+  height: 12px;
+  margin-top: -6px;
+  border: 2px solid rgba(255, 255, 255, 0.4);
+  border-top-color: rgba(255, 255, 255, 0.95);
+  border-radius: 50%;
+  animation: btn-spin 0.8s linear infinite;
+}
+
+@keyframes btn-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+/* loading 态下给文字右 padding，避开小转圈 */
+.action-btn.primary.loading .btn-text {
+  padding-right: 18px;
+}
+
+/* 菜单按钮 disabled：变灰、不可点、hover 不变色 */
+.action-btn.menu:disabled {
+  background-color: #3a302a;
+  color: rgba(255, 255, 255, 0.3);
+  cursor: not-allowed;
+}
+
+.action-btn.menu:disabled:hover {
+  background-color: #3a302a;
+  color: rgba(255, 255, 255, 0.3);
+}
+
+/* 菜单项 disabled：变灰、不可点、hover 不变色 */
+.menu-item.disabled {
+  color: rgba(255, 255, 255, 0.35);
+  cursor: not-allowed;
+  pointer-events: none;
+}
+
+.menu-item.disabled:hover {
+  background-color: transparent;
+  color: rgba(255, 255, 255, 0.35);
+}
+
+.action-btn.menu {
+  background-color: #44372d;
+  color: rgba(255, 255, 255, 0.7);
+  width: 48px;
+  padding: 0;
+}
+
+.action-btn.menu:hover {
+  background-color: #55463a;
+  color: white;
+}
+
+.action-btn.menu svg {
+  display: block;
+}
+
+/* ========== 菜单按钮激活态 ========== */
+.action-btn.menu.active {
+  background-color: #6a4f3d;
+  color: #fff;
+}
+
+/* ========== 菜单小卡片 ========== */
+.menu-card {
+  position: absolute;
+  right: 0;
+  bottom: calc(100% + 8px); /* 出现在按钮上方 */
+  min-width: 160px;
+  padding: 6px;
+  background: rgba(35, 25, 20, 0.92);
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 8px;
+  box-shadow: 0 6px 24px rgba(0, 0, 0, 0.5);
+
+  /* 默认隐藏 */
+  opacity: 0;
+  transform: translateY(6px) scale(0.96);
+  pointer-events: none;
+  visibility: hidden;
+  transition: opacity 0.18s ease, transform 0.18s ease, visibility 0s linear 0.18s;
+  z-index: 200;
+}
+
+.menu-card.visible {
+  opacity: 1;
+  transform: translateY(0) scale(1);
+  pointer-events: auto;
+  visibility: visible;
+  transition: opacity 0.18s ease, transform 0.18s ease, visibility 0s;
+}
+
+.menu-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 9px 12px;
+  background: transparent;
+  border: none;
+  color: rgba(255, 255, 255, 0.85);
+  font-family: inherit;
+  font-size: 13px;
+  text-align: left;
+  cursor: pointer;
+  border-radius: 6px;
+  transition: background-color 0.15s ease, color 0.15s ease;
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+.menu-item:hover {
+  background-color: rgba(255, 255, 255, 0.08);
+  color: #fff;
+}
+
+.menu-item:active {
+  background-color: rgba(255, 255, 255, 0.14);
+}
+
+.menu-item.danger:hover {
+  background-color: rgba(231, 76, 60, 0.25);
+  color: #ff8a80;
+}
+
+.menu-item svg {
+  flex-shrink: 0;
+  opacity: 0.85;
+}
+
+/* 让 .bottom-action-wrapper 作为菜单卡片的定位锚点 */
+.bottom-action-wrapper {
+  position: fixed;
+}
+
+/* ========== 自制弹窗 ========== */
+.modal-overlay {
+  position: fixed;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(0, 0, 0, 0.55);
+  backdrop-filter: blur(6px);
+  -webkit-backdrop-filter: blur(6px);
+  z-index: 9999;
+
+  /* 默认隐藏 */
+  opacity: 0;
+  pointer-events: none;
+  visibility: hidden;
+  transition: opacity 0.18s ease, visibility 0s linear 0.18s;
+}
+
+.modal-overlay.visible {
+  opacity: 1;
+  pointer-events: auto;
+  visibility: visible;
+  transition: opacity 0.18s ease, visibility 0s;
+}
+
+.modal-card {
+  position: relative;
+  min-width: 320px;
+  max-width: 460px;
+  max-height: 80vh;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  padding: 22px 22px 18px;
+  background: rgba(30, 22, 18, 0.96);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 12px;
+  box-shadow: 0 16px 48px rgba(0, 0, 0, 0.6);
+  color: #e8e8e8;
+  /* 内容为长文本时允许在卡片内滚动 */
+  overflow: hidden;
+
+  /* 进场动画 */
+  transform: translateY(8px) scale(0.97);
+  transition: transform 0.18s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.modal-overlay.visible .modal-card {
+  transform: translateY(0) scale(1);
+}
+
+.modal-icon {
+  position: absolute;
+  top: 18px;
+  right: 18px;
+  width: 32px;
+  height: 32px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 50%;
+  background: rgba(216, 69, 0, 0.18);
+  color: #ff8a3d;
+  flex-shrink: 0;
+}
+
+.modal-icon.info {
+  background: rgba(216, 69, 0, 0.18);
+  color: #ff8a3d;
+}
+
+.modal-icon.success {
+  background: rgba(46, 204, 113, 0.18);
+  color: #4cd187;
+}
+
+.modal-icon.warn {
+  background: rgba(241, 196, 15, 0.18);
+  color: #ffd95a;
+}
+
+.modal-icon.error {
+  background: rgba(231, 76, 60, 0.22);
+  color: #ff8a80;
+}
+
+.modal-content {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  overflow-y: auto;
+  max-height: 60vh;
+  user-select: text;
+  -webkit-user-select: text;
+  /* 顶部留出图标的偏移空间，避免标题被覆盖 */
+  padding-right: 48px;
+}
+
+.modal-title {
+  font-size: 16px;
+  font-weight: 600;
+  color: #fff;
+  letter-spacing: 0.3px;
+  margin: 0;
+}
+
+.modal-message {
+  font-size: 13px;
+  line-height: 1.6;
+  color: rgba(255, 255, 255, 0.82);
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.modal-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+  margin-top: 6px;
+  padding-top: 12px;
+  border-top: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.modal-btn {
+  min-width: 84px;
+  padding: 8px 18px;
+  font-size: 13px;
+  font-weight: 500;
+  font-family: inherit;
+  border: none;
+  border-radius: 6px;
+  cursor: pointer;
+  transition: background-color 0.15s ease, color 0.15s ease, transform 0.05s ease;
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+.modal-btn:active {
+  transform: scale(0.97);
+}
+
+.modal-btn-primary {
+  background-color: #d84500;
+  color: #fff;
+}
+
+.modal-btn-primary:hover {
+  background-color: #e55a1a;
+}
+
+.modal-btn-default {
+  background-color: rgba(255, 255, 255, 0.08);
+  color: rgba(255, 255, 255, 0.85);
+}
+
+.modal-btn-default:hover {
+  background-color: rgba(255, 255, 255, 0.16);
+  color: #fff;
+}
+
+.modal-btn-danger {
+  background-color: #c0392b;
+  color: #fff;
+}
+
+.modal-btn-danger:hover {
+  background-color: #d94a3a;
+}

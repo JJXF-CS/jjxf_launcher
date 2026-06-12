@@ -1,0 +1,104 @@
+<!doctype html>
+<html lang="en">
+
+<head>
+  <meta charset="UTF-8" />
+  <link rel="stylesheet" href="styles.css" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>机甲旋風启动器</title>
+  <script type="module" src="/main.js" defer></script>
+</head>
+
+<body>
+  <div class="app">
+    <header class="titlebar" data-tauri-drag-region>
+      <div class="title">机甲旋風启动器</div>
+      <div class="window-controls">
+        <button id="btn-min" aria-label="最小化">─</button>
+        <button id="btn-close" aria-label="关闭">✕</button>
+      </div>
+    </header>
+
+    <main class="container">
+      <!-- 右下角整体操作区 -->
+      <div class="bottom-action-wrapper">
+
+        <!-- 左侧：进度条区域 (默认隐藏/宽度为0) -->
+        <div class="progress-section" id="progress-section">
+          <div class="progress-info">
+            <span class="progress-label-left" id="progress-label-left">准备中…</span>
+            <span class="progress-label-right" id="progress-label-right">0%</span>
+          </div>
+          <div class="progress-track">
+            <div class="progress-fill" id="progress-fill" style="width: 0%;"></div>
+          </div>
+        </div>
+
+        <!-- 右侧：复合按钮 -->
+        <div class="bottom-action-bar">
+          <button class="action-btn primary" id="btn-download">
+            <span class="btn-text">下载游戏</span>
+          </button>
+
+          <button class="action-btn menu" id="btn-menu" aria-label="菜单">
+            <svg viewBox="0 0 24 24" width="24" height="24" stroke="currentColor" stroke-width="2" fill="none"
+              stroke-linecap="round" stroke-linejoin="round">
+              <line x1="3" y1="12" x2="21" y2="12"></line>
+              <line x1="3" y1="6" x2="21" y2="6"></line>
+              <line x1="3" y1="18" x2="21" y2="18"></line>
+            </svg>
+          </button>
+        </div>
+
+        <!-- 菜单小卡片（默认隐藏） -->
+        <div class="menu-card" id="menu-card" role="menu" aria-hidden="true">
+          <button class="menu-item" id="menu-verify" role="menuitem">
+            <svg viewBox="0 0 24 24" width="16" height="16" stroke="currentColor" stroke-width="2" fill="none"
+              stroke-linecap="round" stroke-linejoin="round">
+              <path d="M9 11l3 3L22 4"></path>
+              <path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"></path>
+            </svg>
+            <span>校验文件</span>
+          </button>
+
+          <button class="menu-item danger" id="menu-uninstall" role="menuitem" hidden>
+            <svg viewBox="0 0 24 24" width="16" height="16" stroke="currentColor" stroke-width="2" fill="none"
+              stroke-linecap="round" stroke-linejoin="round">
+              <polyline points="3 6 5 6 21 6"></polyline>
+              <path d="M19 6l-2 14a2 2 0 0 1-2 2H9a2 2 0 0 1-2-2L5 6"></path>
+              <path d="M10 11v6"></path>
+              <path d="M14 11v6"></path>
+              <path d="M9 6V4a2 2 0 0 1 2-2h2a2 2 0 0 1 2 2v2"></path>
+            </svg>
+            <span>卸载游戏</span>
+          </button>
+        </div>
+
+      </div>
+    </main>
+  </div>
+
+  <!-- 自制弹窗容器 (默认隐藏) -->
+  <div class="modal-overlay" id="modal-overlay" aria-hidden="true">
+    <div class="modal-card" role="dialog" aria-modal="true" aria-labelledby="modal-title">
+      <div class="modal-icon" id="modal-icon" aria-hidden="true">
+        <svg viewBox="0 0 24 24" width="22" height="22" stroke="currentColor" stroke-width="2" fill="none"
+          stroke-linecap="round" stroke-linejoin="round">
+          <circle cx="12" cy="12" r="10"></circle>
+          <line x1="12" y1="8" x2="12" y2="12"></line>
+          <line x1="12" y1="16" x2="12.01" y2="16"></line>
+        </svg>
+      </div>
+      <div class="modal-content">
+        <h3 class="modal-title" id="modal-title">提示</h3>
+        <div class="modal-message" id="modal-message"></div>
+      </div>
+      <div class="modal-actions" id="modal-actions">
+        <button class="modal-btn modal-btn-default" id="modal-btn-cancel" hidden>取消</button>
+        <button class="modal-btn modal-btn-primary" id="modal-btn-ok">确定</button>
+      </div>
+    </div>
+  </div>
+</body>
+
+</html>

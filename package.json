@@ -1,0 +1,19 @@
+{
+  "name": "jjxf_launcher",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "scripts": {
+    "tauri": "tauri",
+    "dev": "tauri dev",
+    "build": "tauri build",
+    "build:win": "tauri build --target x86_64-pc-windows-msvc",
+    "build:linux": "tauri build --bundles deb,rpm,appimage",
+    "build:linux:deb": "tauri build --bundles deb",
+    "build:linux:rpm": "tauri build --bundles rpm",
+    "build:linux:appimage": "tauri build --bundles appimage"
+  },
+  "devDependencies": {
+    "@tauri-apps/cli": "^2"
+  }
+}

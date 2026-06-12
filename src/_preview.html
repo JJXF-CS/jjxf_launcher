@@ -1,0 +1,117 @@
+<!doctype html>
+<html lang="en">
+
+<head>
+  <meta charset="UTF-8" />
+  <link rel="stylesheet" href="styles.css" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Loading 状态预览</title>
+  <style>
+    body { background: #1a1a1a; }
+  </style>
+</head>
+
+<body>
+  <div class="app">
+    <header class="titlebar" data-tauri-drag-region>
+      <div class="title">Loading 状态预览</div>
+      <div class="window-controls">
+        <button id="btn-min" aria-label="最小化">─</button>
+        <button id="btn-close" aria-label="关闭">✕</button>
+      </div>
+    </header>
+
+    <main class="container">
+      <div class="bottom-action-wrapper">
+        <div class="progress-section visible" id="progress-section">
+          <div class="progress-info">
+            <span class="progress-label-left" id="progress-label-left">正在下载更新…</span>
+            <span class="progress-label-right" id="progress-label-right">42%</span>
+          </div>
+          <div class="progress-track">
+            <div class="progress-fill" id="progress-fill" style="width: 42%;"></div>
+          </div>
+        </div>
+
+        <div class="bottom-action-bar">
+          <button class="action-btn primary" id="btn-download">
+            <span class="btn-text">下载游戏</span>
+          </button>
+          <button class="action-btn menu" id="btn-menu" aria-label="菜单">
+            <svg viewBox="0 0 24 24" width="24" height="24" stroke="currentColor" stroke-width="2" fill="none"
+              stroke-linecap="round" stroke-linejoin="round">
+              <line x1="3" y1="12" x2="21" y2="12"></line>
+              <line x1="3" y1="6" x2="21" y2="6"></line>
+              <line x1="3" y1="18" x2="21" y2="18"></line>
+            </svg>
+          </button>
+        </div>
+
+        <div class="menu-card visible" id="menu-card" role="menu" aria-hidden="false">
+          <button class="menu-item" id="menu-verify" role="menuitem">
+            <svg viewBox="0 0 24 24" width="16" height="16" stroke="currentColor" stroke-width="2" fill="none"
+              stroke-linecap="round" stroke-linejoin="round">
+              <path d="M9 11l3 3L22 4"></path>
+              <path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"></path>
+            </svg>
+            <span>校验文件</span>
+          </button>
+          <button class="menu-item danger" id="menu-uninstall" role="menuitem">
+            <svg viewBox="0 0 24 24" width="16" height="16" stroke="currentColor" stroke-width="2" fill="none"
+              stroke-linecap="round" stroke-linejoin="round">
+              <polyline points="3 6 5 6 21 6"></polyline>
+              <path d="M19 6l-2 14a2 2 0 0 1-2 2H9a2 2 0 0 1-2-2L5 6"></path>
+            </svg>
+            <span>卸载游戏</span>
+          </button>
+        </div>
+      </div>
+    </main>
+  </div>
+
+  <!-- 预览辅助：模拟按钮 loading 状态 -->
+  <div id="dev-bar" style="position:fixed;top:50px;left:20px;display:flex;gap:8px;z-index:9999;">
+    <button id="btn-sim-download">模拟 download loading</button>
+    <button id="btn-sim-verify">模拟 verify loading</button>
+    <button id="btn-sim-reset">恢复 idle</button>
+  </div>
+
+  <script>
+    const btn = document.getElementById("btn-download");
+    const btnText = btn.querySelector(".btn-text");
+    const menuBtn = document.getElementById("btn-menu");
+    const verify = document.getElementById("menu-verify");
+    const uninstall = document.getElementById("menu-uninstall");
+    const label = document.getElementById("progress-label-left");
+
+    function setLoading(text) {
+      btnText.textContent = text;
+      btn.classList.add("loading");
+      btn.disabled = true;
+      menuBtn.disabled = true;
+      verify.classList.add("disabled");
+      uninstall.classList.add("disabled");
+    }
+    function reset() {
+      btnText.textContent = "下载游戏";
+      btn.classList.remove("loading");
+      btn.disabled = false;
+      menuBtn.disabled = false;
+      verify.classList.remove("disabled");
+      uninstall.classList.remove("disabled");
+      label.textContent = "准备中…";
+    }
+
+    document.getElementById("btn-sim-download").onclick = () => {
+      label.textContent = "正在下载更新…";
+      setLoading("下载中…");
+    };
+    document.getElementById("btn-sim-verify").onclick = () => {
+      label.textContent = "正在校验文件…";
+      setLoading("校验中…");
+    };
+    document.getElementById("btn-sim-reset").onclick = reset;
+  </script>
+</body>
+
+</html>

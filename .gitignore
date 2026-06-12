@@ -1,0 +1,122 @@
+# ============================================================
+# Node / Frontend dependencies
+# ============================================================
+node_modules/
+.pnpm-store/
+
+# ============================================================
+# Build / Dist outputs
+# ============================================================
+# Frontend build output
+dist/
+dist-ssr/
+build/
+out/
+
+# Tauri bundle outputs (deb, rpm, appimage, msi, nsis, dmg, etc.)
+src-tauri/target/
+src-tauri/gen/schemas/
+
+# ============================================================
+# Logs
+# ============================================================
+logs/
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+lerna-debug.log*
+tauri-dev.log*
+
+# ============================================================
+# Local environment / config (do NOT commit)
+# ============================================================
+.env
+.env.*
+!.env.example
+*.local
+
+# ============================================================
+# Tauri / Rust
+# ============================================================
+# Cargo build artifacts
+**/target/
+**/Cargo.lock.bak
+# (src-tauri/Cargo.lock is intentionally kept for reproducible builds)
+
+# Embedded Windows resources
+*.rs.bk
+
+# Tauri generated files
+**/gen/
+
+# ============================================================
+# Game runtime data (downloaded on first launch)
+# ============================================================
+run/game/*.pack
+run/game/*.pak
+run/game/*.zip
+run/game/*.tar*
+run/game/cache/
+run/game/temp/
+run/game/*.tmp
+run/game/*.crdownload
+run/game/*.part
+# Keep run/game/manifest.json (the source of truth for game files)
+
+# ============================================================
+# IDE / Editor
+# ============================================================
+.vscode/
+!.vscode/extensions.json
+!.vscode/settings.json.example
+.idea/
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.sw?
+*.iml
+.cursor/
+.fleet/
+.windsurf/
+*.code-workspace
+
+# ============================================================
+# OS files
+# ============================================================
+.DS_Store
+.DS_Store?
+._*
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+$RECYCLE.BIN/
+
+# ============================================================
+# Misc / Cache
+# ============================================================
+.cache/
+.parcel-cache/
+.eslintcache
+.stylelintcache
+*.tgz
+.tmp/
+temp/
+coverage/
+.nyc_output/
+
+# ============================================================
+# Sensitive / build secrets (never commit)
+# ============================================================
+*.pem
+*.key
+secrets/
+config/local.*
+
+
+# ============================================================
+# run
+# ============================================================
+run/
