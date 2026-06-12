@@ -2,7 +2,7 @@
 // 负责启动 game.exe、检测进程是否运行、终止进程
 
 use std::process::Command;
-use std::sync::Mutex;
+use std::sync::{atomic::AtomicBool, atomic::Ordering, Mutex};
 
 use serde::Serialize;
 
@@ -10,29 +10,59 @@ use crate::paths::game_exe_path;
 
 /// 记录当前游戏的 PID
 static GAME_PID: Mutex<Option<u32>> = Mutex::new(None);
+/// 防止并发调用 launch_game
+static LAUNCHING: AtomicBool = AtomicBool::new(false);
 
 /// 启动游戏
 #[tauri::command]
 pub fn launch_game() -> Result<String, String> {
-    let exe_path = game_exe_path()
-        .map_err(|e| format!("无法获取 game.exe 路径: {}", e))?;
-
-    if !exe_path.exists() {
-        return Err(format!("game.exe 不存在: {}", exe_path.display()));
+    if LAUNCHING.swap(true, Ordering::SeqCst) {
+        return Err("游戏正在启动中，请勿重复操作".to_string());
     }
 
-    // 如果已有游戏实例，先杀掉
-    let _ = kill_game();
+    let result = (|| -> Result<String, String> {
+        let exe_path = game_exe_path()
+            .map_err(|e| format!("无法获取 game.exe 路径: {}", e))?;
 
-    let child = Command::new(&exe_path)
-        .spawn()
-        .map_err(|e| format!("启动 game.exe 失败: {}", e))?;
+        if !exe_path.exists() {
+            return Err(format!("game.exe 不存在: {}", exe_path.display()));
+        }
 
-    let pid = child.id();
-    let mut guard = GAME_PID.lock().unwrap();
-    *guard = Some(pid);
+        let game_dir = exe_path
+            .parent()
+            .ok_or_else(|| "无法解析 game.exe 所在目录".to_string())?;
 
-    Ok(format!("已启动 game.exe (PID: {})", pid))
+        let mut cmd = Command::new(&exe_path);
+        cmd.current_dir(game_dir);
+
+        // Windows: 用 DETACHED_PROCESS + CREATE_NEW_PROCESS_GROUP 让游戏完全独立，
+        // 不受启动器进程组影响（避免 Ctrl+C / 进程组信号误杀游戏）
+        #[cfg(target_os = "windows")]
+        {
+            use std::os::windows::process::CommandExt;
+            const DETACHED_PROCESS: u32 = 0x00000008;
+            const CREATE_NEW_PROCESS_GROUP: u32 = 0x00000200;
+            cmd.creation_flags(DETACHED_PROCESS | CREATE_NEW_PROCESS_GROUP);
+        }
+
+        let child = cmd
+            .spawn()
+            .map_err(|e| format!("启动 game.exe 失败: {}", e))?;
+
+        let pid = child.id();
+        let mut guard = GAME_PID.lock().unwrap();
+        *guard = Some(pid);
+
+        // 显式 forget child，确保句柄不会被关闭（虽然 Rust 的 Child::drop 不会杀进程，
+        // 但在某些 Windows 版本上关闭进程句柄可能导致非预期行为）
+        std::mem::forget(child);
+
+        println!("[Process] 游戏已启动 PID={}, cwd={}", pid, game_dir.display());
+        Ok(format!("已启动 game.exe (PID: {})", pid))
+    })();
+
+    LAUNCHING.store(false, Ordering::SeqCst);
+    result
 }
 
 /// 终止游戏

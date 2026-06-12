@@ -220,7 +220,7 @@ function startProcessWatch() {
     } catch (e) {
       // 静默忽略
     }
-  }, 10000);
+  }, 2000);
 }
 
 function stopProcessWatch() {
