@@ -173,8 +173,8 @@ body {
   opacity: 0;
   overflow: hidden;
 
-  /* 动画过渡 */
-  transition: all 0.4s cubic-bezier(0.4, 0, 0.2, 1);
+  /* 动画过渡：min-width 使用 1s 动画平滑响应窗口大小变化 */
+  transition: min-width 1s ease, width 0.4s cubic-bezier(0.4, 0, 0.2, 1), opacity 0.4s cubic-bezier(0.4, 0, 0.2, 1);
 
   /* 布局 */
   display: flex;

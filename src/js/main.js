@@ -28,6 +28,16 @@ import { setupModalListeners } from "./modal/modal.js";
 window.addEventListener("DOMContentLoaded", () => {
   const appWindow = getCurrentWindow();
 
+  // 根据窗口宽度实时更新进度条区域最小宽度（1s 间隔 + CSS 1s 动画）
+  const progressSection = document.querySelector(".progress-section");
+  const updateProgressMinWidth = () => {
+    if (progressSection) {
+      progressSection.style.minWidth = `${Math.max(window.innerWidth - 303, 0)}px`;
+    }
+  };
+  updateProgressMinWidth();
+  setInterval(updateProgressMinWidth, 1000);
+
   // 窗口控制
   document.querySelector("#btn-min").addEventListener("click", () => {
     appWindow.minimize();

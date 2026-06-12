@@ -13,6 +13,8 @@
         "title": "jjxf_launcher",
         "width": 1280,
         "height": 720,
+        "minWidth": 940,
+        "minHeight": 560,
         "decorations": false,
         "transparent": true
       }
@@ -23,7 +25,7 @@
   },
   "bundle": {
     "active": true,
-    "targets": "all",
+    "targets": "all", 
     "windows": {
       "wix": {},
       "nsis": {}
