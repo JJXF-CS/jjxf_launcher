@@ -23,7 +23,8 @@ use tauri::AppHandle;
 use crate::config::{
     BACKUP_HOST, CHUNK_MAX_CONSECUTIVE_FAILS, CHUNK_MIN_FILE_SIZE, CHUNK_MIN_SIZE,
     CHUNK_RETRY_BASE_MS, CONNECT_TIMEOUT, DEFAULT_PACKS_PATH, FILE_CHUNK_CONCURRENCY,
-    FILE_MAX_ATTEMPTS, GAME_EXE_NAME, PACK_FILE_EXT, PRIMARY_HOST, READ_CHUNK_TIMEOUT,
+    FILE_MAX_ATTEMPTS, GAME_EXE_NAME, PACK_FILE_EXT, PACKS_PARALLEL_DOWNLOADS,
+    PRIMARY_HOST, READ_CHUNK_TIMEOUT,
 };
 
 
@@ -495,32 +496,54 @@ async fn start_download_internal(app: &AppHandle) -> Result<DownloadDonePayload,
         .filter(|p| !pack_already_ok.contains(&p.name))
         .cloned().collect();
 
-    // 顺序下载：一个 pck 下载完成再下下一个（单文件内部 24 路分片并发）
-    // 使用多线程分片下载：每个 pck 内部也被拆成 FILE_CHUNK_CONCURRENCY 个 Range 并发拉取
+    // pck 并行下载（同时最多 PACKS_PARALLEL_DOWNLOADS 个文件）
+    // 每个 pck 内部也有 FILE_CHUNK_CONCURRENCY 个 Range 分片并发拉取
     // 下载阶段不校验 sha256，只检查大小——后序统一走资源校验
-    let mut concurrent_results: Vec<(PackEntry, String, DownloadOutcome)> = Vec::with_capacity(pending.len());
+    let semaphore = Arc::new(tokio::sync::Semaphore::new(PACKS_PARALLEL_DOWNLOADS));
+    let concurrent_results: Arc<std::sync::Mutex<Vec<(PackEntry, String, DownloadOutcome)>>> =
+        Arc::new(std::sync::Mutex::new(Vec::with_capacity(pending.len())));
+
+    let mut handles = Vec::with_capacity(pending.len());
     for p in pending {
-        let file_label = format!("{}{}", p.name, PACK_FILE_EXT);
-        let done_now = shared_done_files.load(Ordering::Relaxed);
-        let pack_pct = percent_of_packs(shared_downloaded.load(Ordering::Relaxed), total_pack_bytes);
-        let pack_overall = compute_overall_percent(true, pack_pct);
-        let outcome = if should_use_chunks(p.expected_size) {
-            download_file_with_retry_chunks(
-                app, &p.url, &p.local_path,
-                p.expected_size, None,
-                "packs", &file_label, done_now, total_packs,
-                pack_overall, shared_downloaded.clone(), total_pack_bytes,
-            ).await
-        } else {
-            download_file_with_retry_concurrent(
-                app, &p.url, &p.local_path,
-                Some(p.expected_size), None,
-                "packs", &file_label, done_now, total_packs,
-                pack_overall, shared_downloaded.clone(), total_pack_bytes,
-            ).await
-        };
-        concurrent_results.push((p, file_label, outcome));
+        let permit = semaphore.clone().acquire_owned().await.map_err(|e| format!("获取信号量失败: {}", e))?;
+        let app = app.clone();
+        let sd = shared_downloaded.clone();
+        let sdf = shared_done_files.clone();
+        let results = concurrent_results.clone();
+
+        handles.push(tokio::spawn(async move {
+            let file_label = format!("{}{}", p.name, PACK_FILE_EXT);
+            let done_now = sdf.load(Ordering::Relaxed);
+            let pack_pct = percent_of_packs(sd.load(Ordering::Relaxed), total_pack_bytes);
+            let pack_overall = compute_overall_percent(true, pack_pct);
+            let outcome = if should_use_chunks(p.expected_size) {
+                download_file_with_retry_chunks(
+                    &app, &p.url, &p.local_path,
+                    p.expected_size, None,
+                    "packs", &file_label, done_now, total_packs,
+                    pack_overall, sd.clone(), total_pack_bytes,
+                ).await
+            } else {
+                download_file_with_retry_concurrent(
+                    &app, &p.url, &p.local_path,
+                    Some(p.expected_size), None,
+                    "packs", &file_label, done_now, total_packs,
+                    pack_overall, sd.clone(), total_pack_bytes,
+                ).await
+            };
+
+            drop(permit);
+            results.lock().unwrap().push((p, file_label, outcome));
+        }));
     }
+
+    // 等待所有下载任务完成
+    for h in handles {
+        let _ = h.await;
+    }
+
+    let mut concurrent_results: Vec<(PackEntry, String, DownloadOutcome)> =
+        Arc::try_unwrap(concurrent_results).unwrap().into_inner().unwrap();
 
 
     // 处理下载结果——下载阶段不写 verify.json、不校验 sha256，仅看大小
@@ -705,6 +728,7 @@ async fn start_download_internal(app: &AppHandle) -> Result<DownloadDonePayload,
 
 // ============== 通用下载 + 校验 + 写文件 ==============
 
+#[derive(Debug)]
 enum DownloadOutcome {
     Ok { size: u64, sha256: Option<String> },
     Err(String),

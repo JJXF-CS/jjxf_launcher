@@ -62,3 +62,5 @@ pub const CHUNK_MIN_SIZE: u64 = 256 * 1024; // 256KB
 pub const CHUNK_MAX_CONSECUTIVE_FAILS: u32 = 5;
 /// 一次下载中重试的退避初始延迟（后续翻倍）
 pub const CHUNK_RETRY_BASE_MS: u64 = 200;
+/// pck 文件并行下载数（同时下载多个 .pck 文件）
+pub const PACKS_PARALLEL_DOWNLOADS: usize = 2;
