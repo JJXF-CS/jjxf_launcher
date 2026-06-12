@@ -1,4 +1,4 @@
-// ============== 按钮点击处理 (下载/更新/开始游戏) ==============
+// ============== 按钮点击处理 (下载/更新/开始游戏/结束游戏) ==============
 
 import { invoke } from "../tauri.js";
 import {
@@ -11,18 +11,28 @@ import {
   setLocalManifestVersion,
   setLocalManifestExists,
   setVerifyState,
+  setCurrentButtonState,
 } from "../state/state.js";
 import { showProgress, finishProgress, hideProgressImmediately } from "../progress/progress.js";
 import { showAlert } from "../modal/modal.js";
 import { refreshLauncherState } from "./init.js";
+
+// 进程监控定时器
+let processWatchInterval = null;
+let wasRunning = false;
 
 export async function handlePrimaryAction() {
   const state = getCurrentButtonState();
 
   // ======== 开始游戏 ========
   if (state === "play") {
-    console.log("[Launcher] 开始游戏 (TODO: 启动游戏逻辑)");
-    await showAlert("开始游戏功能待实现", { title: "提示", type: "info" });
+    await launchGameAndWatch();
+    return;
+  }
+
+  // ======== 结束游戏 ========
+  if (state === "stop") {
+    await stopGame();
     return;
   }
 
@@ -94,4 +104,132 @@ export async function handlePrimaryAction() {
     hideProgressImmediately();
     await showAlert("下载/更新失败: " + e, { title: "下载失败", type: "error" });
   }
+}
+
+// ============== 游戏启动 + 进程监控 ==============
+
+async function launchGameAndWatch() {
+  const btn = document.getElementById("btn-download");
+  const textEl = btn.querySelector(".btn-text");
+
+  // 按钮变灰显示"启动中…"
+  btn.disabled = true;
+  textEl.textContent = "启动中…";
+  setCurrentButtonState("launching");
+
+  try {
+    await invoke("launch_game");
+  } catch (e) {
+    console.error("[Launcher] 启动游戏失败:", e);
+    btn.disabled = false;
+    setCurrentButtonState("play");
+    textEl.textContent = "开始游戏";
+    await showAlert("启动游戏失败: " + e, { title: "启动失败", type: "error" });
+    return;
+  }
+
+  // 轮询检查进程状态（每秒一次，最多30秒）
+  let elapsed = 0;
+  let started = false;
+
+  while (elapsed < 30) {
+    await sleep(1000);
+    elapsed++;
+
+    try {
+      const status = await invoke("check_game_running");
+      if (status.running) {
+        started = true;
+        break;
+      }
+    } catch (e) {
+      console.warn("[Launcher] 检查进程状态失败:", e);
+    }
+  }
+
+  if (started) {
+    // 启动成功：最小化启动器，按钮变为"结束运行"
+    textEl.textContent = "结束运行";
+    btn.disabled = false;
+    setCurrentButtonState("stop");
+
+    try {
+      const { getCurrentWindow } = await import("../tauri.js");
+      const win = getCurrentWindow();
+      await win.minimize();
+    } catch (e) {
+      console.warn("[Launcher] 最小化窗口失败:", e);
+    }
+
+    // 启动持续监控
+    startProcessWatch();
+  } else {
+    // 30秒超时：恢复按钮
+    btn.disabled = false;
+    setCurrentButtonState("play");
+    textEl.textContent = "开始游戏";
+    await showAlert("游戏启动超时（30秒），请检查 game.exe 是否正常", {
+      title: "启动超时",
+      type: "warn",
+    });
+  }
+}
+
+async function stopGame() {
+  try {
+    await invoke("kill_game");
+  } catch (e) {
+    console.error("[Launcher] 结束游戏失败:", e);
+  }
+  stopProcessWatch();
+
+  const btn = document.getElementById("btn-download");
+  const textEl = btn.querySelector(".btn-text");
+  textEl.textContent = "开始游戏";
+  setCurrentButtonState("play");
+}
+
+function startProcessWatch() {
+  stopProcessWatch();
+  wasRunning = true;
+
+  processWatchInterval = setInterval(async () => {
+    try {
+      const status = await invoke("check_game_running");
+      if (status.running && !wasRunning) {
+        // 进程从无到有：最小化启动器，按钮变为结束
+        wasRunning = true;
+        setCurrentButtonState("stop");
+        document.getElementById("btn-download").querySelector(".btn-text").textContent = "结束运行";
+
+        const { getCurrentWindow } = await import("../tauri.js");
+        try { await getCurrentWindow().minimize(); } catch (_) {}
+      }
+
+      if (!status.running && wasRunning) {
+        // 进程从有到无：还原窗口，按钮变为开始
+        wasRunning = false;
+        setCurrentButtonState("play");
+        document.getElementById("btn-download").querySelector(".btn-text").textContent = "开始游戏";
+
+        const { getCurrentWindow } = await import("../tauri.js");
+        const win = getCurrentWindow();
+        try { await win.setFocus(); } catch (_) {}
+        try { await win.show(); } catch (_) {}
+      }
+    } catch (e) {
+      // 静默忽略
+    }
+  }, 10000);
+}
+
+function stopProcessWatch() {
+  if (processWatchInterval) {
+    clearInterval(processWatchInterval);
+    processWatchInterval = null;
+  }
+}
+
+function sleep(ms) {
+  return new Promise(resolve => setTimeout(resolve, ms));
 }

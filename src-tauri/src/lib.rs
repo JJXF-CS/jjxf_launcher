@@ -20,6 +20,7 @@ mod events;
 mod manifest;
 mod network;
 mod paths;
+mod process;
 mod verify_state;
 
 #[tauri::command]
@@ -59,6 +60,9 @@ pub fn run() {
             downloader::read_verify_state,
             downloader::clear_verify_state,
             downloader::check_update_needed,
+            process::launch_game,
+            process::kill_game,
+            process::check_game_running,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

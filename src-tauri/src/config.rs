@@ -38,6 +38,7 @@ pub const GAME_EXE_NAME: &str = "game.exe";
 /// 本地资源包目录（落在 game_dir/hot_update 下）
 pub const HOT_UPDATE_DIR: &str = "hot_update";
 /// 本地 manifest.json 文件名
+#[allow(dead_code)]
 pub const LOCAL_MANIFEST_NAME: &str = "manifest.json"; // 供外部模块按需使用
 /// 本地校验记录文件名
 pub const VERIFY_RECORD_NAME: &str = "verify.json";
@@ -49,6 +50,7 @@ pub const EVT_ERROR: &str = "manifest:error";
 
 /// 下载阶段事件名（用于新下载流程，前端 listen("download:progress") 监听）
 pub const EVT_DOWNLOAD_PROGRESS: &str = "download:progress";
+#[allow(dead_code)]
 pub const EVT_DOWNLOAD_DONE: &str = "download:done";
 pub const EVT_DOWNLOAD_ERROR: &str = "download:error";
 

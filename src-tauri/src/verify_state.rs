@@ -102,6 +102,7 @@ pub fn set_manifest_version_and_path(version: &str, path: &str) -> Result<(), St
 }
 
 /// 同时记录 manifest_version（一般只在确定要写其他字段时一起写）
+#[allow(dead_code)]
 pub fn set_manifest_version(version: &str) -> Result<(), String> {
     let mut state = load();
     state.manifest_version = Some(version.to_string());

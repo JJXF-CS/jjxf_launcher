@@ -17,23 +17,47 @@ import { refreshLauncherState } from "./init.js";
 export async function handleVerify() {
   console.log("[Launcher] 校验文件");
 
-  // 先读取本地 manifest 是否存在
+  // 1) 先从服务器拉取最新 manifest.json（确保校验用的是最新 sha256）
+  showProgress("init");
+  try {
+    const fresh = await invoke("fetch_manifest_with_fallback", {
+      phase: "verify",
+    });
+    setServerManifestContent(fresh);
+    const version = await invoke("parse_manifest_version", {
+      content: fresh,
+    });
+    setServerManifestVersion(version);
+
+    // 保存到本地，供 verify_local_files 读取
+    const savedPath = await invoke("save_manifest", { content: fresh });
+    console.log("[Launcher] 已拉取最新 manifest.json 并保存到:", savedPath);
+  } catch (e) {
+    console.error("[Launcher] 拉取服务端 manifest 失败:", e);
+    hideProgressImmediately();
+    await showAlert("无法连接服务器获取版本信息", { title: "网络异常", type: "warn" });
+    return;
+  }
+
+  // 2) 检查本地安装状态
   try {
     const local = await invoke("read_local_manifest");
     setLocalManifestExists(local.exists);
     setLocalManifestVersion(local.version);
 
     if (!local.exists) {
+      hideProgressImmediately();
       await showAlert("本地未安装游戏，无需校验", { title: "提示", type: "info" });
       return;
     }
   } catch (e) {
     console.error("[Launcher] 读取本地 manifest 失败:", e);
+    hideProgressImmediately();
     await showAlert("读取本地 manifest 失败: " + e, { title: "校验失败", type: "error" });
     return;
   }
 
-  // 显示进度条（校验阶段）
+  // 3) 开始校验（用最新的 manifest 内容）
   showProgress("verify");
   try {
     const result = await invoke("verify_local_files");

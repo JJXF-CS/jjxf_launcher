@@ -3,7 +3,7 @@
 use serde::Serialize;
 use tauri::{AppHandle, Emitter};
 
-use crate::config::{EVT_DONE, EVT_DOWNLOAD_DONE, EVT_DOWNLOAD_ERROR, EVT_DOWNLOAD_PROGRESS, EVT_ERROR, EVT_PROGRESS};
+use crate::config::{EVT_DONE, EVT_DOWNLOAD_ERROR, EVT_DOWNLOAD_PROGRESS, EVT_ERROR, EVT_PROGRESS};
 
 /// 推送到前端的进度事件 payload（manifest 拉取阶段）
 #[derive(Clone, Serialize)]

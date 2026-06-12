@@ -15,8 +15,6 @@ use std::io::{Read, Seek, Write};
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, atomic::{AtomicU64, AtomicU32, Ordering}};
 use futures_util::StreamExt;
-use futures_util::stream;
-use log::{error, info, warn};
 use serde::Deserialize;
 use sha2::{Digest, Sha256};
 use tauri::AppHandle;
@@ -37,6 +35,7 @@ use crate::verify_state::{self, FileVerifyRecord};
 
 // ============== manifest 结构 ==============
 
+#[allow(dead_code)]
 #[derive(Debug, Deserialize)]
 struct PackInfo {
     sha256: String,
@@ -47,6 +46,7 @@ struct PackInfo {
     version: Option<String>,
 }
 
+#[allow(dead_code)]
 #[derive(Debug, Deserialize)]
 struct ExeInfo {
     sha256: String,
@@ -85,6 +85,7 @@ struct ExeEntry {
 const EXE_STAGE_WEIGHT: f32 = 5.0;
 const PACKS_STAGE_WEIGHT: f32 = 95.0;
 /// 同时下载的 pck 文件数（保留为历史常量；现在为 1，即单文件顺序下载）
+#[allow(dead_code)]
 const DOWNLOAD_CONCURRENCY: usize = 1;
 
 // ============== 线程状态统计 ==============
@@ -199,7 +200,7 @@ fn spawn_stats_monitor(stats: Arc<ThreadStats>, file_label: String) -> tokio::sy
                         .record_bytes(bytes)
                         .map(|(_, s)| s)
                         .unwrap_or_else(|| "测量中…".to_string());
-                    let line = format!(
+                    let _line = format!(
                         "[Downloader] {}  总分片={}  请求中={}  接收中={}  失败={}  速度={}",
                         file_label, total, req, rec, fail, speed_str
                     );
@@ -355,7 +356,7 @@ async fn start_download_internal(app: &AppHandle) -> Result<DownloadDonePayload,
         }
     };
 
-    let total_all_bytes = exe_total + total_pack_bytes;
+    let _total_all_bytes = exe_total + total_pack_bytes;
 
     // exe 下载 + sha256 校验循环（最多重试 FILE_MAX_ATTEMPTS 次）
     let mut exe_attempt = 0;
@@ -394,7 +395,7 @@ async fn start_download_internal(app: &AppHandle) -> Result<DownloadDonePayload,
             };
 
             match result {
-                DownloadOutcome::Ok { size, sha256 } => {
+                DownloadOutcome::Ok { size, sha256: _ } => {
                     // 校验 sha256（如果 manifest 中有 exe.sha256）
                     let computed = compute_file_sha256(&exe.local_path).ok();
                     let sha256_ok = match (&expected_exe_sha256, &computed) {
@@ -542,7 +543,7 @@ async fn start_download_internal(app: &AppHandle) -> Result<DownloadDonePayload,
         let _ = h.await;
     }
 
-    let mut concurrent_results: Vec<(PackEntry, String, DownloadOutcome)> =
+    let concurrent_results: Vec<(PackEntry, String, DownloadOutcome)> =
         Arc::try_unwrap(concurrent_results).unwrap().into_inner().unwrap();
 
 
@@ -730,6 +731,7 @@ async fn start_download_internal(app: &AppHandle) -> Result<DownloadDonePayload,
 
 #[derive(Debug)]
 enum DownloadOutcome {
+    #[allow(dead_code)]
     Ok { size: u64, sha256: Option<String> },
     Err(String),
 }
@@ -1527,7 +1529,7 @@ async fn download_file_with_retry_chunks(
     primary_url: &str,
     local_path: &Path,
     expected_size: u64,
-    expected_sha256: Option<&str>,
+    _expected_sha256: Option<&str>,
     stage: &str,
     file_label: &str,
     files_done: u32,
@@ -1798,6 +1800,7 @@ async fn verify_local_files_internal(app: &AppHandle) -> Result<DownloadDonePayl
     })
 }
 
+#[allow(dead_code)]
 fn percent_of_u64_local(a: u64, total: u64) -> f32 {
     if total == 0 { 100.0 } else { (a as f32 / total as f32) * 100.0 }
 }
