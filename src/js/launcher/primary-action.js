@@ -10,17 +10,28 @@ import {
   setServerManifestVersion,
   setLocalManifestVersion,
   setLocalManifestExists,
+  setVerifyState,
 } from "../state/state.js";
 import { showProgress, finishProgress, hideProgressImmediately } from "../progress/progress.js";
 import { showAlert } from "../modal/modal.js";
 import { refreshLauncherState } from "./init.js";
 
 export async function handlePrimaryAction() {
-  if (getCurrentButtonState() === "play") {
+  const state = getCurrentButtonState();
+
+  // ======== 开始游戏 ========
+  if (state === "play") {
     console.log("[Launcher] 开始游戏 (TODO: 启动游戏逻辑)");
     await showAlert("开始游戏功能待实现", { title: "提示", type: "info" });
     return;
   }
+
+  // ======== 下载/继续下载/更新：共用同一套流程 ========
+  // 步骤：
+  //   1) 从服务器拉取最新 manifest.json 并保存到本地
+  //   2) 调用 start_download：按 manifest.json 里的文件列表逐个下载 + 校验
+  //   3) 刷新 verify.json 状态
+  //   4) 刷新按钮文案
 
   if (!getServerManifestContent()) {
     console.error("[Launcher] 没有可用的服务端 manifest，无法落盘");
@@ -31,9 +42,9 @@ export async function handlePrimaryAction() {
     return;
   }
 
-  // 下载/更新时也走带进度的拉取，再保存
-  showProgress("download");
   try {
+    // 1) 先显示“获取版本信息”进度条，拉取最新 manifest 并保存
+    showProgress("init");
     const fresh = await invoke("fetch_manifest_with_fallback", {
       phase: "download",
     });
@@ -42,7 +53,6 @@ export async function handlePrimaryAction() {
       content: fresh,
     });
     setServerManifestVersion(version);
-
     const savedPath = await invoke("save_manifest", { content: fresh });
     console.log("[Launcher] manifest.json 已保存到:", savedPath);
 
@@ -50,18 +60,33 @@ export async function handlePrimaryAction() {
     setLocalManifestExists(local.exists);
     setLocalManifestVersion(local.version);
 
-    finishProgress("更新完成");
-    if (
-      getServerManifestVersion() &&
-      getLocalManifestVersion() &&
-      getServerManifestVersion() === getLocalManifestVersion()
-    ) {
-      await showAlert("更新完成，现在可以开始游戏", {
-        title: "更新完成",
+    // 2) manifest 拉取完成后切换到“下载主程序”阶段
+    showProgress("exe");
+    const result = await invoke("start_download");
+
+    console.log("[Launcher] start_download 结果:", result);
+
+    // 3) 刷新 verify.json 状态
+    try {
+      const vs = await invoke("read_verify_state");
+      setVerifyState(vs);
+    } catch (e) {
+      console.warn("[Launcher] 读取 verify_state 失败:", e);
+    }
+
+    // 4) 刷新按钮
+    if (result.ok) {
+      finishProgress("下载完成");
+      await showAlert("下载完成，现在可以开始游戏", {
+        title: "下载完成",
         type: "success",
       });
     } else {
-      await showAlert("manifest.json 已下载", { title: "提示", type: "info" });
+      finishProgress(`下载完成（${result.failed_files?.length || 0} 个文件失败）`);
+      await showAlert(
+        `下载完成，但有 ${result.failed_files?.length || 0} 个文件失败：\n${(result.failed_files || []).join("\n")}`,
+        { title: "部分下载失败", type: "warn" }
+      );
     }
     refreshLauncherState();
   } catch (e) {

@@ -6,6 +6,7 @@ import {
   setServerManifestVersion,
   setLocalManifestVersion,
   setLocalManifestExists,
+  setVerifyState,
 } from "../state/state.js";
 import { showProgress, finishProgress, hideProgressImmediately } from "../progress/progress.js";
 import { updateButtonState } from "./button-state.js";
@@ -31,9 +32,17 @@ export async function initLauncher() {
     setLocalManifestVersion(null);
   }
 
-  // 2) 拉取服务端 manifest.json
-  //    使用后端内置的「主用 oss.jjxf.cc -> 备用 update.jjxf.cc + 最多 3 次重试」逻辑
-  //    启动时也要显示进度条
+  // 2) 读取 verify.json 状态（用于按钮文案：下载/继续下载/更新/开始游戏）
+  try {
+    const vs = await invoke("read_verify_state");
+    setVerifyState(vs);
+    console.log("[Launcher] verify.json 状态:", vs);
+  } catch (e) {
+    console.error("[Launcher] 读取 verify_state 失败:", e);
+    setVerifyState(null);
+  }
+
+  // 3) 拉取服务端 manifest.json
   showProgress("init");
   try {
     const content = await invoke("fetch_manifest_with_fallback", {
@@ -54,7 +63,7 @@ export async function initLauncher() {
     hideProgressImmediately();
   }
 
-  // 3) 根据本地/服务端版本号决定按钮文字 + 刷新菜单
+  // 4) 根据本地/服务端版本号决定按钮文字 + 刷新菜单
   refreshLauncherState();
 }
 

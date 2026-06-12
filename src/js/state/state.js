@@ -1,22 +1,27 @@
 // ============== 全局状态 ==============
 
-// 当前缓存的服务端 manifest 文本（点击下载/更新时用于落盘）
+// 服务端 manifest
 let serverManifestContent = null;
 let serverManifestVersion = null;
+
+// 本地 manifest
 let localManifestVersion = null;
 let localManifestExists = false;
 
-// 按钮状态：download / update / play
+// verify.json 状态（从后端 read_verify_state 获取）
+let verifyState = null;
+
+// 按钮状态：download / continue_download / update / play
 let currentButtonState = "download";
 
 // 菜单卡片相关
 let isMenuOpen = false;
 
 // 进度条相关
-let currentPhase = null; // init / verify / download / null
+let currentPhase = null; // init / verify / download / exe / packs / null
 let progressHideTimer = null;
 
-// 记录上一次进度条上的 phase，用于 finishProgress / hideProgressImmediately 后恢复按钮文案
+// 记录上一次进度条上的 phase
 let _loadingActivePhase = null;
 
 // 记住主按钮进入 loading 之前的原始文案，恢复时使用
@@ -52,6 +57,14 @@ export function getLocalManifestExists() {
 
 export function setLocalManifestExists(v) {
   localManifestExists = v;
+}
+
+export function getVerifyState() {
+  return verifyState;
+}
+
+export function setVerifyState(v) {
+  verifyState = v;
 }
 
 export function getCurrentButtonState() {

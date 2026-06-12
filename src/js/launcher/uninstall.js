@@ -5,6 +5,7 @@ import {
   getLocalManifestExists,
   setLocalManifestVersion,
   setLocalManifestExists,
+  setVerifyState,
 } from "../state/state.js";
 import { showAlert, showConfirm } from "../modal/modal.js";
 import { refreshLauncherState } from "./init.js";
@@ -35,6 +36,7 @@ export async function handleUninstall() {
     // 卸载后刷新状态
     setLocalManifestExists(false);
     setLocalManifestVersion(null);
+    setVerifyState(null);
     refreshLauncherState();
   } catch (e) {
     console.error("[Launcher] 卸载失败:", e);
