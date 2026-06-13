@@ -34,7 +34,19 @@ pub const DEFAULT_PACKS_PATH: &str = "True_Pcks";
 pub const PACK_FILE_EXT: &str = ".pck";
 
 /// 本地游戏主程序文件名（落在 game_dir 下）
+/// Windows/macOS 使用 game.exe，Linux 使用 game.x86_64
+#[cfg(not(target_os = "linux"))]
 pub const GAME_EXE_NAME: &str = "game.exe";
+#[cfg(target_os = "linux")]
+pub const GAME_EXE_NAME: &str = "game.x86_64";
+
+/// manifest.json 中平台对应的字段名
+#[allow(dead_code)]
+#[cfg(not(target_os = "linux"))]
+pub const MANIFEST_EXE_FIELD: &str = "exe";
+#[allow(dead_code)]
+#[cfg(target_os = "linux")]
+pub const MANIFEST_EXE_FIELD: &str = "linux";
 /// 本地资源包目录（落在 game_dir/hot_update 下）
 pub const HOT_UPDATE_DIR: &str = "hot_update";
 /// 本地 manifest.json 文件名

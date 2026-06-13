@@ -6,6 +6,7 @@ use std::sync::{atomic::AtomicBool, atomic::Ordering, Mutex};
 
 use serde::Serialize;
 
+use crate::config::GAME_EXE_NAME;
 use crate::paths::game_exe_path;
 
 /// 记录当前游戏的 PID
@@ -22,15 +23,31 @@ pub fn launch_game() -> Result<String, String> {
 
     let result = (|| -> Result<String, String> {
         let exe_path = game_exe_path()
-            .map_err(|e| format!("无法获取 game.exe 路径: {}", e))?;
+            .map_err(|e| format!("无法获取 {} 路径: {}", GAME_EXE_NAME, e))?;
 
         if !exe_path.exists() {
-            return Err(format!("game.exe 不存在: {}", exe_path.display()));
+            return Err(format!("{} 不存在: {}", GAME_EXE_NAME, exe_path.display()));
+        }
+
+        // Linux: 确保二进制文件有可执行权限
+        #[cfg(target_os = "linux")]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            if let Ok(meta) = std::fs::metadata(&exe_path) {
+                let permissions = meta.permissions();
+                if permissions.mode() & 0o111 == 0 {
+                    // 没有可执行权限，尝试添加
+                    let _ = std::fs::set_permissions(
+                        &exe_path,
+                        std::fs::Permissions::from_mode(permissions.mode() | 0o755),
+                    );
+                }
+            }
         }
 
         let game_dir = exe_path
             .parent()
-            .ok_or_else(|| "无法解析 game.exe 所在目录".to_string())?;
+            .ok_or_else(|| format!("无法解析 {} 所在目录", GAME_EXE_NAME))?;
 
         let mut cmd = Command::new(&exe_path);
         cmd.current_dir(game_dir);
@@ -47,7 +64,7 @@ pub fn launch_game() -> Result<String, String> {
 
         let child = cmd
             .spawn()
-            .map_err(|e| format!("启动 game.exe 失败: {}", e))?;
+            .map_err(|e| format!("启动 {} 失败: {}", GAME_EXE_NAME, e))?;
 
         let pid = child.id();
         let mut guard = GAME_PID.lock().unwrap();
@@ -58,7 +75,7 @@ pub fn launch_game() -> Result<String, String> {
         std::mem::forget(child);
 
         println!("[Process] 游戏已启动 PID={}, cwd={}", pid, game_dir.display());
-        Ok(format!("已启动 game.exe (PID: {})", pid))
+        Ok(format!("已启动 {} (PID: {})", GAME_EXE_NAME, pid))
     })();
 
     LAUNCHING.store(false, Ordering::SeqCst);
@@ -78,15 +95,15 @@ pub fn kill_game() -> Result<String, String> {
     if let Some(pid) = pid {
         // 尝试优雅终止，失败则强制 kill
         kill_pid(pid);
-        Ok(format!("已终止 game.exe (PID: {})", pid))
+        Ok(format!("已终止 {} (PID: {})", GAME_EXE_NAME, pid))
     } else {
         // 没有记录的 PID，尝试通过进程名查找并终止
-        kill_by_name("game.exe");
-        Ok("已终止 game.exe (by name)".to_string())
+        kill_by_name(GAME_EXE_NAME);
+        Ok(format!("已终止 {} (by name)", GAME_EXE_NAME))
     }
 }
 
-/// 检查 game.exe 进程是否正在运行
+/// 检查游戏进程是否正在运行
 /// 返回 JSON 给前端：{ running: bool }
 #[derive(Serialize)]
 pub struct ProcessStatus {
@@ -111,7 +128,7 @@ pub fn check_game_running() -> Result<ProcessStatus, String> {
     }
 
     // 通过进程名查找（兜底）
-    let running = find_process_by_name("game.exe").is_some();
+    let running = find_process_by_name(GAME_EXE_NAME).is_some();
     Ok(ProcessStatus { running })
 }
 

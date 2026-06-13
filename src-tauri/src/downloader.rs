@@ -58,7 +58,12 @@ struct ExeInfo {
 #[derive(Debug, Deserialize)]
 struct ManifestFile {
     packs: std::collections::BTreeMap<String, PackInfo>,
-    #[serde(default)]
+    /// 根据平台自动选择 exe 或 linux 字段
+    #[cfg(not(target_os = "linux"))]
+    #[serde(default, rename = "exe")]
+    exe: Option<ExeInfo>,
+    #[cfg(target_os = "linux")]
+    #[serde(default, rename = "linux")]
     exe: Option<ExeInfo>,
     #[serde(default)]
     version: Option<String>,
@@ -376,7 +381,7 @@ async fn start_download_internal(app: &AppHandle) -> Result<DownloadDonePayload,
                 Some(exe.url.clone()), 0, exe_total,
             );
 
-            let current_file_label = "game.exe".to_string();
+            let current_file_label = GAME_EXE_NAME.to_string();
             let exe_shared = Arc::new(AtomicU64::new(0));
 
             let result = if exe_total > 0 && should_use_chunks(exe_total) {
